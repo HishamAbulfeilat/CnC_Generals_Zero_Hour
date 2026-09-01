@@ -272,6 +272,39 @@ static bool gxCopyFile(const char *src, const char *dst)
 	return ok;
 }
 
+// GeneralsX @patch KLCLAU 08/31/2026 — Adreno 8xx (Snapdragon 8 Elite /
+// 8 Elite Gen 5, Galaxy S25/S26) stock-driver fallback. The bundled Turnip is
+// built for Adreno 6xx/7xx only (vulkan.ad07xx.so) and enumerates ZERO physical
+// devices on an Adreno 840 -> DXVK throws "DxvkInstance::enumAdapters: Failed to
+// enumerate adapters" and the app dies. The stock Qualcomm driver on 8xx already
+// exposes Vulkan 1.3 + textureCompressionBC, so Turnip is neither needed nor
+// usable there (renderer-research doc "rung 1"). Parse the Adreno model number
+// from kgsl sysfs and skip Turnip for series >= 8. GENERALSX_NO_TURNIP forces it.
+static int gxAdrenoSeries()
+{
+	FILE *f = fopen("/sys/class/kgsl/kgsl-3d0/gpu_model", "r");
+	if (!f)
+		return 0;
+	char buf[64] = {0};
+	size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+	fclose(f);
+	if (n == 0)
+		return 0;
+	// e.g. "Adreno840v2acd" -> 840 -> series 8
+	const char *p = strstr(buf, "Adreno");
+	if (!p)
+		return 0;
+	p += 6;
+	int num = 0;
+	while (*p >= '0' && *p <= '9') {
+		num = num * 10 + (*p - '0');
+		p++;
+	}
+	if (num >= 100)
+		return num / 100;   // 840 -> 8, 750 -> 7, 660 -> 6
+	return num;                  // already a bare series digit
+}
+
 static void gxSetupTurnipDriver()
 {
 	// Driver soname as it ships in the adrenotools package meta.json. adrenotools
@@ -279,6 +312,17 @@ static void gxSetupTurnipDriver()
 	static const char *DRIVER_NAME = "vulkan.ad07xx.so";
 	// The jniLib we ship the Turnip .so as (Android only extracts lib*.so names).
 	static const char *BUNDLED_SONAME = "libvulkan_freedreno.so";
+
+	if (getenv("GENERALSX_NO_TURNIP")) {
+		fprintf(stderr, "INFO: Turnip: GENERALSX_NO_TURNIP set — using stock Vulkan driver\n");
+		return;
+	}
+	const int adrenoSeries = gxAdrenoSeries();
+	if (adrenoSeries >= 8) {
+		fprintf(stderr, "INFO: Turnip: Adreno %dxx detected — bundled Turnip (ad07xx) does not "
+		        "support it; using stock Vulkan driver (Vulkan 1.3 + BCn native)\n", adrenoSeries);
+		return;
+	}
 
 	// 1) nativeLibraryDir: the directory containing this very .so (libmain.so).
 	Dl_info info;
