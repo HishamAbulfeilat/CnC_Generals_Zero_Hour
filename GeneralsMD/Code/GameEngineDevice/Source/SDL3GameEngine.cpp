@@ -658,6 +658,7 @@ SDL3GameEngine::SDL3GameEngine()
 	  m_IsInitialized(false),
 	  m_IsActive(false),
 	  m_IsTextInputActive(false),
+	  m_IsTextInputSecret(false),
 	  m_TextInputFocusWindow(nullptr)
 {
 	fprintf(stderr, "DEBUG: SDL3GameEngine::SDL3GameEngine() created\n");
@@ -946,6 +947,26 @@ void SDL3GameEngine::pollSDL3Events(void)
 #endif
 }
 
+// GeneralsX @feature HishamAbulfeilat 27/09/2026 Start text input typed for the focused field.
+// On touch platforms SDL_StartTextInput raises the on-screen keyboard; for password fields
+// (EntryData::secretText, e.g. the online login) request a hidden-password keyboard with
+// autocorrect off, so the keyboard does not suggest, learn or display the password.
+static bool startTextInputForField(SDL_Window *window, bool secret)
+{
+	SDL_PropertiesID props = SDL_CreateProperties();
+	if (props == 0) {
+		return SDL_StartTextInput(window);
+	}
+	SDL_SetNumberProperty(props, SDL_PROP_TEXTINPUT_TYPE_NUMBER,
+		secret ? SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN : SDL_TEXTINPUT_TYPE_TEXT);
+	if (secret) {
+		SDL_SetBooleanProperty(props, SDL_PROP_TEXTINPUT_AUTOCORRECT_BOOLEAN, false);
+	}
+	const bool started = SDL_StartTextInputWithProperties(window, props);
+	SDL_DestroyProperties(props);
+	return started;
+}
+
 // GeneralsX @bugfix felipebraz 01/04/2026 Enable SDL text input only while an entry gadget owns focus.
 void SDL3GameEngine::updateTextInputState(void)
 {
@@ -958,9 +979,17 @@ void SDL3GameEngine::updateTextInputState(void)
 		focusedWindow != nullptr && BitIsSet(focusedWindow->winGetStyle(), GWS_ENTRY_FIELD);
 
 	if (wantsTextInput) {
+		const EntryData *entry = static_cast<const EntryData *>(focusedWindow->winGetUserData());
+		const Bool secret = entry != nullptr && entry->secretText;
+		if (m_IsTextInputActive && secret != m_IsTextInputSecret) {
+			// Moving between a normal and a password field: restart with the right keyboard.
+			SDL_StopTextInput(m_SDLWindow);
+			m_IsTextInputActive = false;
+		}
 		if (!m_IsTextInputActive) {
-			if (SDL_StartTextInput(m_SDLWindow)) {
+			if (startTextInputForField(m_SDLWindow, secret)) {
 				m_IsTextInputActive = true;
+				m_IsTextInputSecret = secret;
 			}
 		}
 		m_TextInputFocusWindow = focusedWindow;

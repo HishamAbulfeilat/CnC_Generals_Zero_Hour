@@ -74,13 +74,50 @@ final class FolderImporter {
         List<Entry> files = new ArrayList<>();
         List<String> paths = new ArrayList<>();
         collect(rootId, "", files, paths);
+        copyFiles(files, paths, destDir);
+    }
 
+    /**
+     * Copies Zero Hour maps into the user map directory (the engine's
+     * {@code <user data>/Maps/<name>/<name>.map} layout). Accepts a single map folder (it
+     * holds a .map file) or a folder of map folders, e.g. a PC "Maps" folder.
+     *
+     * @return the number of maps imported
+     */
+    int importMapsInto(File mapsDir) throws IOException {
+        listener.onStatus("Looking for maps in the selected folder…");
+        String rootId = DocumentsContract.getTreeDocumentId(treeUri);
+        List<Entry> children = list(rootId);
+
+        List<Entry> files = new ArrayList<>();
+        List<String> paths = new ArrayList<>();
+        int maps = 0;
+        if (containsMapFile(children)) {
+            collect(rootId, displayName(rootId) + "/", files, paths);
+            maps = 1;
+        } else {
+            for (Entry e : children) {
+                if (e.directory && containsMapFile(list(e.documentId))) {
+                    collect(e.documentId, e.name + "/", files, paths);
+                    maps++;
+                }
+            }
+        }
+        if (maps == 0) {
+            throw new IOException("No maps found. Pick a map folder (it contains a .map file) or"
+                    + " a folder of map folders. Extract .zip downloads first.");
+        }
+        copyFiles(files, paths, mapsDir);
+        return maps;
+    }
+
+    private void copyFiles(List<Entry> files, List<String> paths, File destDir) throws IOException {
         long total = 0;
         for (Entry e : files) {
             total += Math.max(e.size, 0);
         }
         if (total > GameDataPaths.freeBytes(destDir)) {
-            throw new IOException("Not enough free space: the game needs "
+            throw new IOException("Not enough free space: this needs "
                     + (total / (1024 * 1024)) + " MB.");
         }
 
@@ -114,6 +151,26 @@ final class FolderImporter {
                 }
             }
         }
+    }
+
+    private static boolean containsMapFile(List<Entry> entries) {
+        for (Entry e : entries) {
+            if (!e.directory && e.name.toLowerCase(Locale.ROOT).endsWith(".map")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String displayName(String documentId) {
+        Uri uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId);
+        String[] projection = { DocumentsContract.Document.COLUMN_DISPLAY_NAME };
+        try (Cursor c = resolver.query(uri, projection, null, null, null)) {
+            if (c != null && c.moveToFirst() && c.getString(0) != null) {
+                return c.getString(0);
+            }
+        }
+        return "ImportedMap";
     }
 
     private String findGameRoot(String documentId, int depth) {

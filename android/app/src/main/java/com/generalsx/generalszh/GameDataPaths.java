@@ -53,6 +53,15 @@ final class GameDataPaths {
         return new File(base, "GeneralsZH");
     }
 
+    /**
+     * The engine's user map directory: SDL3Main.cpp sets XDG_DATA_HOME to the internal files
+     * dir, GlobalData builds the user data path as $XDG_DATA_HOME/GeneralsX/GeneralsZH/ and
+     * MapCache appends "Maps". Maps received from other players in a lobby land here too.
+     */
+    static File userMapsDir(Context context) {
+        return new File(context.getFilesDir(), "GeneralsX/GeneralsZH/Maps");
+    }
+
     static boolean isGameDataDir(File dir) {
         return dir != null && new File(dir, MARKER_FILE).canRead();
     }

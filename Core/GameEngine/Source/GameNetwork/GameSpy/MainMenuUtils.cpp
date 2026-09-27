@@ -49,6 +49,7 @@
 #include "GameNetwork/DownloadManager.h"
 #include "GameNetwork/GameSpy/BuddyThread.h"
 #include "GameNetwork/GameSpy/MainMenuUtils.h"
+#include "GameNetwork/GameSpy/OnlineServiceHosts.h"
 #include "GameNetwork/GameSpy/PeerDefs.h"
 #include "GameNetwork/GameSpy/PeerThread.h"
 
@@ -526,11 +527,21 @@ static GHTTPBool gamePatchCheckCallback( GHTTPRequest request, GHTTPResult resul
 		if (ok && type == "patch")
 		{
 			DEBUG_LOG(("Saw a patch: %d/[%s]", atoi(req.str()), url.str()));
+#ifdef _WIN32
 			queuePatch( atoi(req.str()), url );
 			if (atoi(req.str()))
 			{
 				mustDownloadPatch = TRUE;
 			}
+#else
+			// GeneralsX @bugfix HishamAbulfeilat 27/09/2026 Servserv patches (game and map
+			// pack) are Windows installers: the game downloads them into patches\, quits, and
+			// the Windows-only Launcher.exe applies them on the next start. No build without
+			// that launcher can install one, so queueing it only quit the game (or, for a
+			// mandatory patch, blocked going online for good). This port is updated through
+			// its own releases instead.
+			DEBUG_LOG(("Ignoring servserv patch: installers only run through the Windows launcher"));
+#endif
 		}
 		else if (ok && type == "server")
 		{
@@ -691,9 +702,9 @@ static GHTTPBool numPlayersOnlineCallback( GHTTPRequest request, GHTTPResult res
 void CheckOverallStats()
 {
 #if RTS_GENERALS
-	const char *const url = "http://gamestats.gamespy.com/ccgenerals/display.html";
+	const char *const url = "http://" ONLINE_GAMESTATS_HOST "/ccgenerals/display.html";
 #elif RTS_ZEROHOUR
-	const char *const url = "http://gamestats.gamespy.com/ccgenzh/display.html";
+	const char *const url = "http://" ONLINE_GAMESTATS_HOST "/ccgenzh/display.html";
 #endif
 	ghttpGet(url, GHTTPFalse, overallStatsCallback, nullptr);
 }
@@ -703,9 +714,9 @@ void CheckOverallStats()
 void CheckNumPlayersOnline()
 {
 #if RTS_GENERALS
-	const char *const url = "http://launch.gamespyarcade.com/software/launch/arcadecount2.dll?svcname=ccgenerals";
+	const char *const url = "http://" ONLINE_ARCADE_HOST "/software/launch/arcadecount2.dll?svcname=ccgenerals";
 #elif RTS_ZEROHOUR
-	const char *const url = "http://launch.gamespyarcade.com/software/launch/arcadecount2.dll?svcname=ccgenzh";
+	const char *const url = "http://" ONLINE_ARCADE_HOST "/software/launch/arcadecount2.dll?svcname=ccgenzh";
 #endif
 	ghttpGet(url, GHTTPFalse, numPlayersOnlineCallback, nullptr);
 }
@@ -774,7 +785,8 @@ void HTTPThinkWrapper()
 {
 	if (s_asyncDNSLookupInProgress)
 	{
-		Char hostname[] = "servserv.generals.ea.com";
+		// GeneralsX @bugfix HishamAbulfeilat 27/09/2026 Replacement-service servserv host (OnlineServiceHosts.h).
+		Char hostname[] = ONLINE_SERVSERV_HOST;
 		Int ret = asyncGethostbyname(hostname);
 		switch(ret)
 		{
@@ -830,7 +842,8 @@ void StartPatchCheck()
 		TheGameText->fetch("GUI:CheckingForPatches"), CancelPatchCheckCallbackAndReopenDropdown);
 
 	s_asyncDNSLookupInProgress = TRUE;
-	Char hostname[] = "servserv.generals.ea.com";
+	// GeneralsX @bugfix HishamAbulfeilat 27/09/2026 Replacement-service servserv host (OnlineServiceHosts.h).
+	Char hostname[] = ONLINE_SERVSERV_HOST;
 	Int ret = asyncGethostbyname(hostname);
 	switch(ret)
 	{

@@ -471,7 +471,10 @@ AsciiString GetRegistryGameName()
 
 UnsignedInt GetRegistryVersion()
 {
-	UnsignedInt val = 65536;
+	// GeneralsX @bugfix HishamAbulfeilat 27/09/2026 Default to what the retail 1.04 installer
+	// writes (0x00010004) when no registry value exists (Linux/Android): this is the version
+	// peerSetTitle() reports to the online service, and 65536 did not match retail clients.
+	UnsignedInt val = 0x00010004;
 	GetUnsignedIntFromRegistry("", "Version", val);
 	return val;
 }

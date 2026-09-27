@@ -9,6 +9,13 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(gamespy)
 
+# GeneralsX @bugfix HishamAbulfeilat 27/09/2026 GSI_DOMAIN_NAME only reaches the SDK's own
+# sources. Game code hardcodes EA/GameSpy hosts too (servserv, gamestats, peerchat) and must
+# override SDK master hostnames that do not exist on the replacement service; see
+# Core/GameEngine/Include/GameNetwork/GameSpy/OnlineServiceHosts.h. Set before Core/ and the
+# game directories are added, so every target compiled after this point sees it.
+add_compile_definitions(RTS_GAMESPY_SERVER_NAME="${GAMESPY_SERVER_NAME}")
+
 # GeneralsX @build FadiLabib 06/07/2026 Android's bionic libc has no pthread_cancel.
 # gamespy compiles the Linux thread backend (common/linux/gsthreadlinux.c) on Android, and
 # its only user of pthread_cancel is gsiCancelThread() — a best-effort forced cancel at

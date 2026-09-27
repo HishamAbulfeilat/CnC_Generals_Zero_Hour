@@ -38,6 +38,13 @@
 #include "GameNetwork/GameSpy/BuddyThread.h"
 #include "GameNetwork/GameSpy/PeerDefs.h"
 #include "GameNetwork/GameSpy/PeerThread.h"
+#include "GameNetwork/GameSpy/OnlineServiceHosts.h"
+
+#ifdef ONLINE_MASTER_HOST
+#include "gamespy/gsavailable.h"
+// Declared in the SDK's internal serverbrowsing/sb_internal.h, which is not a public header.
+extern "C" char *SBOverrideMasterServer;
+#endif
 #include "GameNetwork/GameSpy/PersistentStorageThread.h"
 #include "GameNetwork/GameSpy/ThreadUtils.h"
 
@@ -1190,6 +1197,17 @@ void PeerThreadClass::Thread_Function()
 
 	m_qmGroupRoom = 0;
 
+#ifdef ONLINE_MASTER_HOST
+	// GeneralsX @bugfix HishamAbulfeilat 27/09/2026 The SDK derives game-prefixed master
+	// hostnames ("ccgenzh.ms6.<domain>", "ccgenzh.master.<domain>",
+	// "ccgenzh.available.<domain>") that do not resolve on C&C Online; the service
+	// answers all three roles on its master host. Use the SDK's own override hooks.
+	strlcpy(qr2_hostname, ONLINE_MASTER_HOST, sizeof(qr2_hostname));
+	strlcpy(GSIACHostname, ONLINE_MASTER_HOST, sizeof(GSIACHostname));
+	static char s_masterServerOverride[] = ONLINE_MASTER_HOST;
+	SBOverrideMasterServer = s_masterServerOverride;
+#endif
+
 	peer = peerInitialize( &callbacks );
 	DEBUG_ASSERTCRASH( peer != nullptr, ("null peer!") );
 	m_isConnected = m_isConnecting = false;
@@ -1389,7 +1407,7 @@ void PeerThreadClass::Thread_Function()
 				// check our connection
 				//if (m_isConnected)
 				//{
-				//	GetLocalChatConnectionAddress("peerchat.gamespy.com", 6667, localIP);
+				//	GetLocalChatConnectionAddress(ONLINE_PEERCHAT_HOST, 6667, localIP);
 				//}
 				}
 
@@ -2269,7 +2287,7 @@ void PeerThreadClass::connectCallback( PEER peer, PEERBool success )
 	resp.peerResponseType = PeerResponse::PEERRESPONSE_LOGIN;
 	resp.player.profileID = m_profileID;
 	resp.nick = m_loginName;
-	GetLocalChatConnectionAddress("peerchat.gamespy.com", 6667, localIP);
+	GetLocalChatConnectionAddress(ONLINE_PEERCHAT_HOST, 6667, localIP);
 	chatSetLocalIP(localIP);
 	resp.player.internalIP = ntohl(localIP);
 	resp.player.externalIP = ntohl(peerGetLocalIP(peer));

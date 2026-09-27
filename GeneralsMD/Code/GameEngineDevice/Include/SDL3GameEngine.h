@@ -107,6 +107,9 @@ protected:
 	Bool			m_IsInitialized;
 	Bool			m_IsActive;
 	Bool			m_IsTextInputActive;
+	// GeneralsX @feature HishamAbulfeilat 27/09/2026 Whether the active text input was started
+	// for a password (secret) entry field, so a focus change between field kinds restarts it.
+	Bool			m_IsTextInputSecret;
 	GameWindow*	m_TextInputFocusWindow;
 
 	// Event processing

@@ -35,23 +35,30 @@ import in.dragonbra.javasteam.steam.authentication.IAuthenticator;
 public class SetupActivity extends Activity {
     private static final String TAG = "GeneralsX";
     private static final int REQUEST_PICK_FOLDER = 1;
+    private static final int REQUEST_PICK_MAPS = 2;
     private static final String STEAM_STORE_URL =
             "https://store.steampowered.com/app/" + GameDataPaths.STEAM_APP_ID + "/";
+    /** C&C Online (the GameSpy replacement the online menus connect to) account sign-up. */
+    private static final String CNC_ONLINE_REGISTER_URL = "https://cnc-online.net/en/connect/register/";
 
     private TextView status;
     private ProgressBar progress;
+    private TextView intro;
     private LinearLayout buttons;
     private boolean busy;
+    /** Usable game data directory, or null while the game still has to be set up. */
+    private File readyDataDir;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        File dataDir = GameDataPaths.findGameDataDir(this);
-        if (dataDir != null) {
-            launchGame(dataDir);
-            return;
-        }
+        readyDataDir = GameDataPaths.findGameDataDir(this);
         buildUi();
+        if (readyDataDir != null) {
+            showLauncher();
+        } else {
+            showSetup();
+        }
     }
 
     private void launchGame(File dataDir) {
@@ -90,9 +97,7 @@ public class SetupActivity extends Activity {
         title.setTypeface(Typeface.DEFAULT_BOLD);
         root.addView(title);
 
-        TextView intro = new TextView(this);
-        intro.setText("This app is the game engine only. It needs the game files from your own "
-                + "copy of Zero Hour (Steam, EA App or retail CD). Choose how to get them:");
+        intro = new TextView(this);
         intro.setTextColor(Color.LTGRAY);
         intro.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         intro.setPadding(0, dp(8), 0, dp(16));
@@ -100,10 +105,6 @@ public class SetupActivity extends Activity {
 
         buttons = new LinearLayout(this);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
-        buttons.addView(button("Download from Steam", v -> askSteamCredentials()));
-        buttons.addView(button("Import from folder", v -> pickFolder()));
-        buttons.addView(button("Buy on Steam", v ->
-                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(STEAM_STORE_URL)))));
         root.addView(buttons);
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -117,16 +118,44 @@ public class SetupActivity extends Activity {
         status.setTextColor(Color.LTGRAY);
         status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         status.setPadding(0, dp(12), 0, 0);
-        status.setText("Download from Steam: sign in with the Steam account that owns Zero Hour. "
-                + "Your password goes only to Steam and is not saved.\n"
-                + "Import from folder: copy your PC install folder to the device, SD card or "
-                + "USB stick first, then pick it here.");
         root.addView(status);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(Color.rgb(18, 20, 24));
         scroll.addView(root);
         setContentView(scroll);
+    }
+
+    /** Game data is present: play, add maps, set up online, or replace the game files. */
+    private void showLauncher() {
+        intro.setText("Ready to play.");
+        buttons.removeAllViews();
+        buttons.addView(button("Play", v -> launchGame(readyDataDir)));
+        buttons.addView(button("Add maps", v -> pickMapsFolder()));
+        buttons.addView(button("C&C Online account", v -> openUrl(CNC_ONLINE_REGISTER_URL)));
+        buttons.addView(button("Re-import game files", v -> showSetup()));
+        status.setText("Online play uses C&C Online: create a free account, then sign in with it"
+                + " on the in-game Online login screen.\n"
+                + "Add maps: pick a map folder (it contains a .map file) or a folder of map folders."
+                + " Maps other players send you in a lobby are saved automatically.");
+    }
+
+    /** No game data yet (or the user asked to replace it): the ways to get a legal copy. */
+    private void showSetup() {
+        intro.setText("This app is the game engine only. It needs the game files from your own "
+                + "copy of Zero Hour (Steam, EA App or retail CD). Choose how to get them:");
+        buttons.removeAllViews();
+        buttons.addView(button("Download from Steam", v -> askSteamCredentials()));
+        buttons.addView(button("Import from folder", v -> pickFolder()));
+        buttons.addView(button("Buy on Steam", v -> openUrl(STEAM_STORE_URL)));
+        status.setText("Download from Steam: sign in with the Steam account that owns Zero Hour. "
+                + "Your password goes only to Steam and is not saved.\n"
+                + "Import from folder: copy your PC install folder to the device, SD card or "
+                + "USB stick first, then pick it here.");
+    }
+
+    private void openUrl(String url) {
+        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
     }
 
     private Button button(String label, View.OnClickListener onClick) {
@@ -326,29 +355,45 @@ public class SetupActivity extends Activity {
         startActivityForResult(intent, REQUEST_PICK_FOLDER);
     }
 
+    private void pickMapsFolder() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        startActivityForResult(intent, REQUEST_PICK_MAPS);
+    }
+
+    private FolderImporter importer(Uri tree) {
+        return new FolderImporter(getContentResolver(), tree, new FolderImporter.Listener() {
+            @Override
+            public void onStatus(String message) {
+                showStatus(message);
+            }
+
+            @Override
+            public void onProgress(float fraction) {
+                showProgress(fraction);
+            }
+        });
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_PICK_FOLDER || resultCode != RESULT_OK || data == null
-                || data.getData() == null) {
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
             return;
         }
         Uri tree = data.getData();
+        if (requestCode == REQUEST_PICK_FOLDER) {
+            importGame(tree);
+        } else if (requestCode == REQUEST_PICK_MAPS) {
+            importMaps(tree);
+        }
+    }
+
+    private void importGame(Uri tree) {
         File dest = GameDataPaths.appDataDir(this);
         setBusy(true);
         new Thread(() -> {
             try {
-                new FolderImporter(getContentResolver(), tree, new FolderImporter.Listener() {
-                    @Override
-                    public void onStatus(String message) {
-                        showStatus(message);
-                    }
-
-                    @Override
-                    public void onProgress(float fraction) {
-                        showProgress(fraction);
-                    }
-                }).importInto(dest);
+                importer(tree).importInto(dest);
                 if (!GameDataPaths.isGameDataDir(dest)) {
                     onSetupFailed("The copy finished but " + GameDataPaths.MARKER_FILE + " is missing.");
                     return;
@@ -358,5 +403,22 @@ public class SetupActivity extends Activity {
                 onSetupFailed("Import failed: " + e.getMessage());
             }
         }, "FolderImporter").start();
+    }
+
+    private void importMaps(Uri tree) {
+        File mapsDir = GameDataPaths.userMapsDir(this);
+        setBusy(true);
+        new Thread(() -> {
+            try {
+                int count = importer(tree).importMapsInto(mapsDir);
+                runOnUiThread(() -> {
+                    setBusy(false);
+                    status.setText("Added " + count + (count == 1 ? " map" : " maps")
+                            + ". They appear in the Skirmish and multiplayer map lists.");
+                });
+            } catch (Exception e) {
+                onSetupFailed("Adding maps failed: " + e.getMessage());
+            }
+        }, "MapImporter").start();
     }
 }

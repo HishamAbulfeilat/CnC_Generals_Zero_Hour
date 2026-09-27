@@ -520,6 +520,7 @@ set(GAMEENGINE_SRC
     Include/GameNetwork/GameSpy/LadderDefs.h
     Include/GameNetwork/GameSpy/LobbyUtils.h
     Include/GameNetwork/GameSpy/MainMenuUtils.h
+    Include/GameNetwork/GameSpy/OnlineServiceHosts.h
     Include/GameNetwork/GameSpy/PeerDefs.h
     Include/GameNetwork/GameSpy/PeerDefsImplementation.h
     Include/GameNetwork/GameSpy/PeerThread.h

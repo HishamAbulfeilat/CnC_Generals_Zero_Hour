@@ -234,6 +234,29 @@ bool GetStringFromRegistry(std::string path, std::string key, std::string& val)
 	return getStringFromRegistry(HKEY_LOCAL_MACHINE, fullPath.c_str(), key.c_str(), val);
 }
 
+// GeneralsX @bugfix HishamAbulfeilat 27/09/2026 No installer writes registry.ini on
+// Linux/Android, so "Version" and "MapPackVersion" were missing: the servserv patch check
+// then requested english-0.txt / maps-0.txt (version 0 is offered the mandatory patch and
+// blocks going online) and hasWriteAccess() failed before any download. Fall back to the
+// values the retail Zero Hour 1.04 installer writes (Version 0x00010004,
+// MapPackVersion 0x00010000).
+static bool getRetailDefaultUnsignedInt(const std::string& path, const std::string& key, unsigned int& val)
+{
+#if RTS_ZEROHOUR
+	if (path.empty() && key == "Version")
+	{
+		val = 0x00010004;
+		return true;
+	}
+	if (path.empty() && key == "MapPackVersion")
+	{
+		val = 0x00010000;
+		return true;
+	}
+#endif
+	return false;
+}
+
 bool GetUnsignedIntFromRegistry(std::string path, std::string key, unsigned int& val)
 {
 	std::string fullPath = getProductRegistryPath();
@@ -243,7 +266,12 @@ bool GetUnsignedIntFromRegistry(std::string path, std::string key, unsigned int&
 		return true;
 	}
 
-	return getUnsignedIntFromRegistry(HKEY_LOCAL_MACHINE, fullPath.c_str(), key.c_str(), val);
+	if (getUnsignedIntFromRegistry(HKEY_LOCAL_MACHINE, fullPath.c_str(), key.c_str(), val))
+	{
+		return true;
+	}
+
+	return getRetailDefaultUnsignedInt(path, key, val);
 }
 
 bool SetStringInRegistry(std::string path, std::string key, std::string val)

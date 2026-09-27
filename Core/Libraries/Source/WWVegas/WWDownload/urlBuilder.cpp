@@ -31,7 +31,14 @@ void FormatURLFromRegistry( std::string& gamePatchURL, std::string& mapPatchURL,
 	std::string language = "english";
 	unsigned int version = 0; // invalid version - can't get on with a corrupt reg.
 	unsigned int mapVersion = 0; // invalid version - can't get on with a corrupt reg.
+	// GeneralsX @bugfix HishamAbulfeilat 27/09/2026 EA's servserv host is gone; the
+	// replacement service serves the same /servserv/ tree (see OnlineServiceHosts.h).
+	// The registry "BaseURL" value below still overrides it.
+#ifdef RTS_GAMESPY_SERVER_NAME
+	std::string baseURL = "http://http." RTS_GAMESPY_SERVER_NAME "/servserv/";
+#else
 	std::string baseURL = "http://servserv.generals.ea.com/servserv/";
+#endif
 	baseURL.append(sku);
 	baseURL.append("/");
 
