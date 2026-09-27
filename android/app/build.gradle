@@ -7,12 +7,30 @@ android {
         applicationId project.findProperty('GX_APP_ID') ?: 'com.generalsx.generalszh'
         minSdk 29
         targetSdk 29   // sideload-only: keeps requestLegacyExternalStorage effective
-        versionCode 1
-        versionName "1.04"
+        // CI passes the workflow run number so every release installs over the last one.
+        versionCode((project.findProperty('GX_VERSION_CODE') ?: '1') as int)
+        versionName project.findProperty('GX_VERSION_NAME') ?: '1.04'
         ndk { abiFilters 'arm64-v8a' }
     }
+    // Optional permanent signing key (CI: repository secrets, see release-android.yml).
+    // Without it the debug build keeps the machine's own debug key.
+    signingConfigs {
+        if (project.hasProperty('GX_KEYSTORE')) {
+            gxRelease {
+                storeFile file(project.property('GX_KEYSTORE'))
+                storePassword project.property('GX_KEYSTORE_PASSWORD')
+                keyAlias project.property('GX_KEY_ALIAS')
+                keyPassword project.property('GX_KEY_PASSWORD')
+            }
+        }
+    }
     buildTypes {
-        debug { debuggable true }
+        debug {
+            debuggable true
+            if (project.hasProperty('GX_KEYSTORE')) {
+                signingConfig signingConfigs.gxRelease
+            }
+        }
     }
     // GeneralsX @build FadiLabib 07/07/2026 - adrenotools REQUIRES legacy packaging.
     // With the modern (default) packaging Android leaves native libs compressed in

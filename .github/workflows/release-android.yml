@@ -1,17 +1,26 @@
 name: Release Android APK
 
-# Builds the arm64 Android APK (debug-signed, sideload-only) with the same
-# scripts a dev uses locally (docs/BUILD/ANDROID.md), then:
+# Builds the arm64 Android APK (sideload-only) with the same scripts a dev uses
+# locally (docs/BUILD/ANDROID.md), then:
 #   - on any run: uploads the APK as a workflow artifact
-#   - on an android-v* tag: publishes it as a GitHub Release
+#   - on an android-v* tag: publishes it as a GitHub Release under that tag
+#   - on a successful push to the Android port branch: publishes a new GitHub
+#     Release "android-r<run number>" (marked latest)
 # The APK contains NO game assets — players supply their own Zero Hour data.
+#
+# Signing: Android only installs an update signed with the same key as the
+# installed app. Set these repository secrets to sign every build with one
+# permanent key (see docs/BUILD/ANDROID.md, "Release signing"):
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
+#   ANDROID_KEY_PASSWORD
+# Without them each build is signed with the runner's throwaway debug key, and
+# updating requires uninstalling first (which deletes the app's game data).
 
 on:
   workflow_dispatch:
   push:
     tags: ['android-v*']
-    # Build the APK artifact on pushes to the Android port branch; the Release
-    # step below stays tag-only.
+    # Each successful push to the Android port branch publishes a release.
     branches: ['claude/cloud-vs-device-access-hhykct']
 
 permissions:
@@ -84,28 +93,72 @@ jobs:
           # libdxvk_d3d8/d3d9.so to the build root where package-android-zh.sh expects them.
           cmake --build build/android-vulkan --target z_generals dxvk_d3d8_install -j"$(nproc)"
 
+      # Release name and Android versionCode. versionCode must grow with every
+      # release or Android refuses to install it over the previous one.
+      - name: Version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/android-v* ]]; then
+            echo "RELEASE_TAG=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TAG=android-r$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          fi
+          echo "ORG_GRADLE_PROJECT_GX_VERSION_CODE=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          echo "ORG_GRADLE_PROJECT_GX_VERSION_NAME=1.04-r$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Release signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$KEYSTORE_BASE64" ]]; then
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set: signing with the runner's throwaway debug key. Installing this APK over an earlier one will need an uninstall first."
+            echo "SIGNING_NOTE=Signed with a throwaway debug key: uninstall the previous version before installing (this deletes downloaded game files)." >> "$GITHUB_ENV"
+            exit 0
+          fi
+          keystore="$RUNNER_TEMP/release.keystore"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          {
+            echo "ORG_GRADLE_PROJECT_GX_KEYSTORE=$keystore"
+            echo "ORG_GRADLE_PROJECT_GX_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "ORG_GRADLE_PROJECT_GX_KEY_ALIAS=$KEY_ALIAS"
+            echo "ORG_GRADLE_PROJECT_GX_KEY_PASSWORD=$KEY_PASSWORD"
+            echo "SIGNING_NOTE=Signed with the project's release key: installs as an update over earlier releases."
+          } >> "$GITHUB_ENV"
+
       - name: Package APK
         run: |
           export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"
           export VCPKG_ROOT="$HOME/vcpkg"
           ./scripts/build/android/package-android-zh.sh
           cp android/app/build/outputs/apk/debug/app-debug.apk \
-             "GeneralsZH-Android-${GITHUB_REF_NAME//\//-}-debug.apk"
+             "GeneralsZH-Android-${RELEASE_TAG}.apk"
 
       - uses: actions/upload-artifact@v4
         with:
           name: GeneralsZH-Android-apk
           path: GeneralsZH-Android-*.apk
 
+      # Runs only when every step above succeeded (the default for steps).
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/android-v')
+        if: startsWith(github.ref, 'refs/tags/android-v') || github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" GeneralsZH-Android-*.apk \
-            --title "Android $GITHUB_REF_NAME" \
-            --generate-notes \
-            --notes "Debug-signed APK for sideloading (arm64, Adreno GPUs — see README).
-
-          **You need your own Zero Hour game assets** — this APK ships none.
-          Push assets with \`scripts/build/android/push-assets-android.sh\`."
+          notes="$RUNNER_TEMP/release-notes.md"
+          {
+            echo "Android APK for Command & Conquer Generals: Zero Hour (arm64)."
+            echo
+            echo "Built from \`${GITHUB_SHA::7}\`: $(git log -1 --format=%s "$GITHUB_SHA")"
+            echo
+            echo "- **You need your own copy of Zero Hour.** On first launch the app downloads it from your Steam account or imports it from a folder; this APK ships no game assets."
+            echo "- Needs an arm64 device; Qualcomm Adreno GPUs are the best supported."
+            echo "- ${SIGNING_NOTE}"
+          } > "$notes"
+          # A release created with GITHUB_TOKEN does not trigger another workflow run.
+          gh release create "$RELEASE_TAG" GeneralsZH-Android-*.apk \
+            --target "$GITHUB_SHA" \
+            --title "Android ${RELEASE_TAG#android-}" \
+            --notes-file "$notes" \
+            --latest

@@ -236,6 +236,39 @@ Stages Liberation fonts (renamed to match the retail font names, e.g. `arial.ttf
 
 ---
 
+## Releases (CI)
+
+`.github/workflows/release-android.yml` publishes a GitHub Release after every successful
+build of a push to the Android port branch (`android-r<run number>`, marked latest), and for
+`android-v*` tags. Each release's `versionCode` is the workflow run number, so a newer
+release always installs over an older one.
+
+### Release signing
+
+Android installs an update only if it is signed with the same key as the installed app.
+Without a configured key every CI build is signed with a fresh throwaway debug key, and
+installing a newer release requires uninstalling first, which also deletes the game data the
+app downloaded or imported. Create one permanent key and store it as repository secrets:
+
+```sh
+keytool -genkeypair -v -keystore generalszh-release.keystore -alias generalszh \
+  -keyalg RSA -keysize 4096 -validity 10000
+base64 -w0 generalszh-release.keystore > keystore.b64   # macOS: base64 -i generalszh-release.keystore
+```
+
+In the GitHub repository: **Settings → Secrets and variables → Actions → New repository
+secret**, add
+
+| Secret | Value |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | contents of `keystore.b64` |
+| `ANDROID_KEYSTORE_PASSWORD` | the keystore password you chose |
+| `ANDROID_KEY_ALIAS` | `generalszh` |
+| `ANDROID_KEY_PASSWORD` | the key password (same as the keystore password unless you chose another) |
+
+Keep `generalszh-release.keystore` and its passwords backed up privately: losing them means
+users must uninstall to move to a build signed with a new key. Never commit the keystore.
+
 ## Device Setup
 
 ### USB debugging
