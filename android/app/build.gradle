@@ -53,7 +53,8 @@ android {
         resources {
             // Duplicate metadata from the JavaSteam/ktor/okhttp dependency jars.
             excludes += ['META-INF/INDEX.LIST', 'META-INF/DEPENDENCIES', 'META-INF/LICENSE*',
-                         'META-INF/NOTICE*', 'META-INF/*.kotlin_module', 'META-INF/versions/9/previous-compilation-data.bin']
+                         'META-INF/NOTICE*', 'META-INF/*.kotlin_module', 'META-INF/versions/9/previous-compilation-data.bin',
+                         'META-INF/versions/9/OSGI-INF/MANIFEST.MF']
         }
     }
     sourceSets.main {
@@ -70,4 +71,7 @@ dependencies {
     // zstd-jni's .aar carries the Android native libraries (the plain jar has desktop ones only).
     implementation 'com.github.luben:zstd-jni:1.5.7-4@aar'
     implementation 'org.tukaani:xz:1.10'
+    // JavaSteam's CryptoHelper requires a full BouncyCastle provider and does not bundle one
+    // (Android's built-in "BC" is a stripped copy); SteamGameDownloader installs this one.
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.83'
 }

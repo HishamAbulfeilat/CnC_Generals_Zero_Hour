@@ -8,7 +8,10 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.security.Security;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 
 import in.dragonbra.javasteam.depotdownloader.DepotDownloader;
 import in.dragonbra.javasteam.depotdownloader.IDownloadListener;
@@ -29,6 +32,8 @@ import in.dragonbra.javasteam.steam.steamclient.SteamClient;
 import in.dragonbra.javasteam.steam.steamclient.callbackmgr.CallbackManager;
 import in.dragonbra.javasteam.steam.steamclient.callbacks.ConnectedCallback;
 import in.dragonbra.javasteam.steam.steamclient.callbacks.DisconnectedCallback;
+
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 /**
  * Downloads the user's own copy of Zero Hour from Steam with JavaSteam's depot downloader
@@ -78,7 +83,44 @@ final class SteamGameDownloader implements IDownloadListener {
         thread.start();
     }
 
+    /**
+     * JavaSteam's CryptoHelper needs a full BouncyCastle provider registered as "BC" (it does
+     * not bundle one; without it the class fails to initialise and sign-in dies with just
+     * "in.dragonbra.javasteam.util.crypto.CryptoHelper"). Android already registers its own
+     * stripped platform copy under the name "BC", which lacks algorithms JavaSteam asks for
+     * and would block ours from being added, so replace it before JavaSteam loads.
+     */
+    private static synchronized void installBouncyCastle() {
+        if (Security.getProvider("BC") instanceof BouncyCastleProvider) {
+            return;
+        }
+        Security.removeProvider("BC");
+        Security.insertProviderAt(new BouncyCastleProvider(), 1);
+    }
+
+    /** Readable failure text: the root cause's type and message, not a bare class name. */
+    static String describe(Throwable error) {
+        Throwable t = error;
+        while ((t instanceof ExecutionException || t instanceof CompletionException
+                || t instanceof ExceptionInInitializerError) && t.getCause() != null) {
+            t = t.getCause();
+        }
+        String message = t.getMessage();
+        return t.getClass().getSimpleName() + (message != null ? ": " + message : "");
+    }
+
     private void run() {
+        try {
+            installBouncyCastle();
+            runSession();
+        } catch (Throwable t) {
+            // Errors (e.g. a class failing to load) must still end the busy UI state.
+            Log.e("GeneralsX", "Steam download thread failed", t);
+            fail("Steam download failed: " + describe(t));
+        }
+    }
+
+    private void runSession() {
         // Default configuration: JavaSteam ships OkHttp as a runtime-only dependency, so the
         // app cannot reference OkHttp types to customise the HTTP client.
         steamClient = new SteamClient();
@@ -134,9 +176,9 @@ final class SteamGameDownloader implements IDownloadListener {
             // A random login ID keeps this session from kicking the user's desktop client.
             logOn.setLoginID(new Random().nextInt(Integer.MAX_VALUE));
             steamUser.logOn(logOn);
-        } catch (Exception e) {
-            Throwable cause = e.getCause() != null ? e.getCause() : e;
-            fail("Steam sign-in failed: " + cause.getMessage());
+        } catch (Exception | Error e) {
+            Log.e("GeneralsX", "Steam sign-in failed", e);
+            fail("Steam sign-in failed: " + describe(e));
             steamClient.disconnect();
         }
     }
@@ -209,7 +251,7 @@ final class SteamGameDownloader implements IDownloadListener {
 
         Throwable error = failure.getNow(null);
         if (error != null) {
-            fail("Download failed: " + error.getMessage()
+            fail("Download failed: " + describe(error)
                     + "\n\nMake sure this Steam account owns Command & Conquer Generals - Zero Hour.");
         } else if (!GameDataPaths.isGameDataDir(installDir)) {
             fail("The download finished but " + GameDataPaths.MARKER_FILE

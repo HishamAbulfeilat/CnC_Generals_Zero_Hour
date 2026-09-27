@@ -133,12 +133,12 @@ jobs:
           export VCPKG_ROOT="$HOME/vcpkg"
           ./scripts/build/android/package-android-zh.sh
           cp android/app/build/outputs/apk/debug/app-debug.apk \
-             "GeneralsZH-Android-${RELEASE_TAG}.apk"
+             "GeneralsZH-${RELEASE_TAG}.apk"
 
       - uses: actions/upload-artifact@v4
         with:
           name: GeneralsZH-Android-apk
-          path: GeneralsZH-Android-*.apk
+          path: GeneralsZH-*.apk
 
       # Runs only when every step above succeeded (the default for steps).
       - name: Publish GitHub Release
@@ -157,7 +157,7 @@ jobs:
             echo "- ${SIGNING_NOTE}"
           } > "$notes"
           # A release created with GITHUB_TOKEN does not trigger another workflow run.
-          gh release create "$RELEASE_TAG" GeneralsZH-Android-*.apk \
+          gh release create "$RELEASE_TAG" GeneralsZH-*.apk \
             --target "$GITHUB_SHA" \
             --title "Android ${RELEASE_TAG#android-}" \
             --notes-file "$notes" \
