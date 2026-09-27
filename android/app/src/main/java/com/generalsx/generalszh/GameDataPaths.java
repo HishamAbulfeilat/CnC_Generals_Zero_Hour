@@ -62,6 +62,49 @@ final class GameDataPaths {
         return new File(context.getFilesDir(), "GeneralsX/GeneralsZH/Maps");
     }
 
+    /**
+     * Deletes caches the game rebuilds on its own: DXVK pipeline caches (*.dxvk-cache, written
+     * next to the game data and in the app cache dir), Mesa Turnip's shader cache
+     * ($HOME/.cache, HOME being the internal files dir) and the user map list cache
+     * (Maps/MapCache.ini, rescanned on the next start). Fixes stale shaders after a driver
+     * update or maps not showing up. Returns the number of files deleted.
+     */
+    static int clearCaches(Context context, File dataDir) {
+        int deleted = 0;
+        File[] roots = { dataDir, context.getCacheDir() };
+        for (File root : roots) {
+            File[] files = root != null ? root.listFiles() : null;
+            if (files == null) {
+                continue;
+            }
+            for (File f : files) {
+                if (f.isFile() && f.getName().endsWith(".dxvk-cache") && f.delete()) {
+                    deleted++;
+                }
+            }
+        }
+        deleted += deleteTree(new File(context.getFilesDir(), ".cache"));
+        File mapCache = new File(userMapsDir(context), "MapCache.ini");
+        if (mapCache.isFile() && mapCache.delete()) {
+            deleted++;
+        }
+        return deleted;
+    }
+
+    private static int deleteTree(File f) {
+        int deleted = 0;
+        File[] children = f.listFiles();
+        if (children != null) {
+            for (File c : children) {
+                deleted += deleteTree(c);
+            }
+        }
+        if (f.exists() && f.delete() && children == null) {
+            deleted++;
+        }
+        return deleted;
+    }
+
     static boolean isGameDataDir(File dir) {
         return dir != null && new File(dir, MARKER_FILE).canRead();
     }

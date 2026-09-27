@@ -12,7 +12,9 @@ import android.text.InputType;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.provider.Settings;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
@@ -22,6 +24,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import in.dragonbra.javasteam.steam.authentication.IAuthenticator;
@@ -47,6 +51,8 @@ public class SetupActivity extends Activity {
     private ProgressBar progress;
     private TextView intro;
     private LinearLayout buttons;
+    /** Buttons of the current screen; layoutButtons() arranges them into a grid. */
+    private final List<Button> buttonList = new ArrayList<>();
     private Button pauseButton;
     private boolean busy;
     /** Download state already acted on (dialog shown / game launched); survives recreation. */
@@ -174,11 +180,14 @@ public class SetupActivity extends Activity {
     /** Game data is present: play, add maps, set up online, or replace the game files. */
     private void showLauncher() {
         intro.setText("Ready to play.");
-        buttons.removeAllViews();
-        buttons.addView(button("Play", v -> launchGame(readyDataDir)));
-        buttons.addView(button("Add maps", v -> pickMapsFolder()));
-        buttons.addView(button("C&C Online account", v -> openUrl(CNC_ONLINE_REGISTER_URL)));
-        buttons.addView(button("Re-import game files", v -> showSetup()));
+        buttonList.clear();
+        buttonList.add(button("Play", v -> launchGame(readyDataDir)));
+        buttonList.add(button("Add maps", v -> pickMapsFolder()));
+        buttonList.add(button("Update game files", v -> onUpdateGameFiles()));
+        buttonList.add(button("Clear caches", v -> onClearCaches()));
+        buttonList.add(button("Check for app updates", v -> onCheckForAppUpdate()));
+        buttonList.add(button("C&C Online account", v -> openUrl(CNC_ONLINE_REGISTER_URL)));
+        buttonList.add(button("Re-import game files", v -> showSetup()));
         layoutButtons();
         status.setText("Online play uses C&C Online: create a free account, then sign in with it"
                 + " on the in-game Online login screen.\n"
@@ -190,14 +199,15 @@ public class SetupActivity extends Activity {
     private void showSetup() {
         intro.setText("This app is the game engine only. It needs the game files from your own "
                 + "copy of Zero Hour (Steam, EA App or retail CD). Choose how to get them:");
-        buttons.removeAllViews();
+        buttonList.clear();
         String account = SteamLoginStore.savedAccountName(this);
-        buttons.addView(button(account != null ? "Download from Steam (" + account + ")"
+        buttonList.add(button(account != null ? "Download from Steam (" + account + ")"
                 : "Download from Steam", v -> onDownloadFromSteam()));
-        buttons.addView(button("Import from folder", v -> pickFolder()));
-        buttons.addView(button("Buy on Steam", v -> openUrl(STEAM_STORE_URL)));
+        buttonList.add(button("Import from folder", v -> pickFolder()));
+        buttonList.add(button("Buy on Steam", v -> openUrl(STEAM_STORE_URL)));
+        buttonList.add(button("Check for app updates", v -> onCheckForAppUpdate()));
         if (account != null) {
-            buttons.addView(button("Sign out of Steam", v -> {
+            buttonList.add(button("Sign out of Steam", v -> {
                 SteamLoginStore.clear(this);
                 showSetup();
             }));
@@ -222,19 +232,39 @@ public class SetupActivity extends Activity {
         return b;
     }
 
-    /** One row of buttons in landscape; a full-width column in portrait. */
+    /** A grid of buttons: one full-width column in portrait, three columns in landscape. */
     private void layoutButtons() {
         boolean portrait = getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_PORTRAIT;
-        buttons.setOrientation(portrait ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
-        for (int i = 0; i < buttons.getChildCount(); i++) {
-            LinearLayout.LayoutParams lp = portrait
-                    ? new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT)
-                    : new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-            lp.setMargins(0, 0, portrait ? 0 : dp(12), portrait ? dp(8) : 0);
-            buttons.getChildAt(i).setLayoutParams(lp);
+        int columns = portrait ? 1 : Math.min(3, Math.max(1, buttonList.size()));
+        buttons.removeAllViews();
+        buttons.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout row = null;
+        for (int i = 0; i < buttonList.size(); i++) {
+            if (i % columns == 0) {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                buttons.addView(row, new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            }
+            Button b = buttonList.get(i);
+            if (b.getParent() != null) {
+                ((ViewGroup) b.getParent()).removeView(b);
+            }
+            row.addView(b, cell(i % columns < columns - 1));
         }
+        // Pad the last row so its buttons keep the same width as the rows above.
+        int remainder = buttonList.size() % columns;
+        for (int i = remainder; remainder > 0 && i < columns; i++) {
+            row.addView(new View(this), cell(i < columns - 1));
+        }
+    }
+
+    private LinearLayout.LayoutParams cell(boolean gapAfter) {
+        LinearLayout.LayoutParams lp =
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        lp.setMargins(0, 0, gapAfter ? dp(12) : 0, dp(8));
+        return lp;
     }
 
     private void setBusy(boolean value) {
@@ -309,6 +339,93 @@ public class SetupActivity extends Activity {
         if (!busy || DownloadService.state().running) {
             super.onBackPressed();
         }
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Maintenance: app updates, game file updates, caches
+
+    private void onCheckForAppUpdate() {
+        setBusy(true);
+        status.setText("Checking for updates…");
+        new Thread(() -> {
+            try {
+                AppUpdater.Release release = AppUpdater.findNewerRelease(this);
+                runOnUiThread(() -> {
+                    setBusy(false);
+                    if (release == null) {
+                        status.setText("You have the latest version (r"
+                                + AppUpdater.installedVersionCode(this) + ").");
+                    } else {
+                        offerUpdate(release);
+                    }
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    setBusy(false);
+                    status.setText("Could not check for updates: " + e.getMessage());
+                });
+            }
+        }, "UpdateCheck").start();
+    }
+
+    private void offerUpdate(AppUpdater.Release release) {
+        new AlertDialog.Builder(this)
+                .setTitle("Update available")
+                .setMessage("Version r" + release.versionCode + " is available (you have r"
+                        + AppUpdater.installedVersionCode(this) + ", download "
+                        + (release.apkSize / (1024 * 1024)) + " MB). Your game files, maps and"
+                        + " Steam login are kept.")
+                .setNegativeButton("Later", null)
+                .setPositiveButton("Update", (d, w) -> installUpdate(release))
+                .show();
+    }
+
+    private void installUpdate(AppUpdater.Release release) {
+        if (!getPackageManager().canRequestPackageInstalls()) {
+            // One-time Android permission to install updates from this app.
+            status.setText("Allow \"Install unknown apps\" for Generals ZH, then tap"
+                    + " \"Check for app updates\" again.");
+            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getPackageName())));
+            return;
+        }
+        setBusy(true);
+        status.setText("Downloading update r" + release.versionCode + "…");
+        new Thread(() -> {
+            try {
+                AppUpdater.install(this, release, this::showProgress);
+                runOnUiThread(() -> {
+                    setBusy(false);
+                    status.setText("Confirm the update in the Android installer.");
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    setBusy(false);
+                    status.setText("Update failed: " + e.getMessage());
+                });
+            }
+        }, "UpdateInstall").start();
+    }
+
+    /** Re-runs the Steam download: validates every file, fetches what changed or is damaged. */
+    private void onUpdateGameFiles() {
+        new AlertDialog.Builder(this)
+                .setTitle("Update game files")
+                .setMessage("Checks your Zero Hour files against Steam and downloads anything"
+                        + " that changed or is damaged. Maps and settings are kept.")
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton("Check now", (d, w) -> onDownloadFromSteam())
+                .show();
+    }
+
+    private void onClearCaches() {
+        File dataDir = readyDataDir;
+        new Thread(() -> {
+            int count = GameDataPaths.clearCaches(this, dataDir);
+            runOnUiThread(() -> status.setText("Cleared " + count + " cache file"
+                    + (count == 1 ? "" : "s") + ". Shader and map caches rebuild on the next start"
+                    + " (the first load is slower)."));
+        }, "ClearCaches").start();
     }
 
     // ---------------------------------------------------------------------------------

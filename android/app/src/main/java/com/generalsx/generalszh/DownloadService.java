@@ -179,6 +179,12 @@ public class DownloadService extends Service {
                     dest, new Listener(dest));
         }
 
+        // Also used to update/repair an existing install: until this run completes, the data
+        // must not count as a finished install (an interrupted update resumes like a download).
+        File completeFlag = new File(dest, GameDataPaths.COMPLETE_FLAG);
+        if (completeFlag.exists() && !completeFlag.delete()) {
+            Log.w(TAG, "Could not clear " + completeFlag);
+        }
         setPending(true);
         acquireLocks();
         publish(new State(true, "Connecting to Steam…", -1f, null, null));
