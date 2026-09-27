@@ -26,8 +26,30 @@ android {
             useLegacyPackaging = true
         }
     }
+    // JavaSteam (in-app Steam download) is built for Java 17.
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    packaging {
+        resources {
+            // Duplicate metadata from the JavaSteam/ktor/okhttp dependency jars.
+            excludes += ['META-INF/INDEX.LIST', 'META-INF/DEPENDENCIES', 'META-INF/LICENSE*',
+                         'META-INF/NOTICE*', 'META-INF/*.kotlin_module', 'META-INF/versions/9/previous-compilation-data.bin']
+        }
+    }
     sourceSets.main {
         jniLibs.srcDirs = ['jniLibs']       // populated by package-android-zh.sh
         java.srcDirs = ['src/main/java', 'sdl-java']  // sdl-java copied from SDL3 source
     }
+}
+
+dependencies {
+    // In-app download of the user's own Zero Hour copy from Steam (SetupActivity).
+    implementation 'in.dragonbra:javasteam:1.8.0'
+    implementation 'in.dragonbra:javasteam-depotdownloader:1.8.0'
+    // JavaSteam declares its depot-chunk decompressors compileOnly; supply them here.
+    // zstd-jni's .aar carries the Android native libraries (the plain jar has desktop ones only).
+    implementation 'com.github.luben:zstd-jni:1.5.7-4@aar'
+    implementation 'org.tukaani:xz:1.10'
 }

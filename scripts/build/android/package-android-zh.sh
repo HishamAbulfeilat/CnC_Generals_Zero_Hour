@@ -74,6 +74,10 @@ echo "  embedded libvulkan_freedreno.so (Mesa Turnip driver)"
 # Versioned .so names (libSDL3.so.0) are not loadable from an APK: keep bare .so only.
 for f in "${JNILIBS}"/*.so.*; do [[ -e "$f" ]] && rm "$f"; done
 
+# Fonts for the in-app setup flow: SetupActivity copies them into the game data dir
+# (the engine loads fonts/*.ttf from there). Metric-compatible Liberation fonts (SIL OFL).
+GX_FONTS="${ANDROID_DIR}/app/src/main/assets/fonts" "${PROJECT_ROOT}/scripts/build/ios/stage-fonts.sh"
+
 mkdir -p "${SDL_JAVA_DST}"
 cp -R "${SDL_JAVA_SRC}/org" "${SDL_JAVA_DST}/"
 echo "  copied SDL3 Java glue"

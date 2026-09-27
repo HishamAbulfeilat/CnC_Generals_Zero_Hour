@@ -28,8 +28,14 @@ miles. **No game assets included** — bring your own Zero Hour
    (others: [#9](https://github.com/fadi-labib/Generals-Android/issues/9)).
 2. **APK**: [Releases](https://github.com/fadi-labib/Generals-Android/releases) →
    sideload ([Samsung gotcha](https://fadi-labib.github.io/Generals-Android/BUILD/ANDROID/#samsung-sideload-gotcha)).
-3. **Assets**: push your own game files —
-   [how](https://fadi-labib.github.io/Generals-Android/BUILD/ANDROID/#assets).
+3. **Game files**: on first launch the app asks for your own copy of Zero Hour:
+   - **Download from Steam**: sign in with the Steam account that owns
+     [Zero Hour](https://store.steampowered.com/app/2732960/) and the app downloads it
+     (about 2 GB; Steam Guard supported; your password goes only to Steam and is not saved).
+   - **Import from folder**: copy your PC install folder to the device, SD card or USB
+     stick, then pick it in the system folder picker.
+   - Or push the files over adb as before —
+     [how](https://fadi-labib.github.io/Generals-Android/BUILD/ANDROID/#assets).
 
 More questions? **[FAQ](https://fadi-labib.github.io/Generals-Android/FAQ/)**.
 
