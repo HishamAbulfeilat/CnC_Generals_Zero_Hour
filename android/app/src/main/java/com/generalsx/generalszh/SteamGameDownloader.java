@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 import in.dragonbra.javasteam.depotdownloader.DepotDownloader;
 import in.dragonbra.javasteam.depotdownloader.IDownloadListener;
@@ -30,8 +29,6 @@ import in.dragonbra.javasteam.steam.steamclient.SteamClient;
 import in.dragonbra.javasteam.steam.steamclient.callbackmgr.CallbackManager;
 import in.dragonbra.javasteam.steam.steamclient.callbacks.ConnectedCallback;
 import in.dragonbra.javasteam.steam.steamclient.callbacks.DisconnectedCallback;
-import in.dragonbra.javasteam.steam.steamclient.configuration.SteamConfiguration;
-import okhttp3.OkHttpClient;
 
 /**
  * Downloads the user's own copy of Zero Hour from Steam with JavaSteam's depot downloader
@@ -82,14 +79,9 @@ final class SteamGameDownloader implements IDownloadListener {
     }
 
     private void run() {
-        SteamConfiguration config = SteamConfiguration.create(builder -> builder.withHttpClient(
-                new OkHttpClient.Builder()
-                        .connectTimeout(15, TimeUnit.SECONDS)
-                        .readTimeout(60, TimeUnit.SECONDS)
-                        .writeTimeout(30, TimeUnit.SECONDS)
-                        .build()));
-
-        steamClient = new SteamClient(config);
+        // Default configuration: JavaSteam ships OkHttp as a runtime-only dependency, so the
+        // app cannot reference OkHttp types to customise the HTTP client.
+        steamClient = new SteamClient();
         CallbackManager manager = new CallbackManager(steamClient);
         steamUser = steamClient.getHandler(SteamUser.class);
 
