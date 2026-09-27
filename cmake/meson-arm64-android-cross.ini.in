@@ -31,5 +31,8 @@ endian = 'little'
 [built-in options]
 c_args = []
 cpp_args = []
-c_link_args = []
-cpp_link_args = []
+# 16 KB ELF page alignment. Android 15+ ships (and Google Play requires, since
+# Nov 2025) a 16 KB-page kernel; a 4 KB-aligned .so triggers a system "not
+# 16 KB compatible" warning on install and fails to load on a real 16 KB device.
+c_link_args = ['-Wl,-z,max-page-size=16384', '-Wl,-z,common-page-size=16384']
+cpp_link_args = ['-Wl,-z,max-page-size=16384', '-Wl,-z,common-page-size=16384']

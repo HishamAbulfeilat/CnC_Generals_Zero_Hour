@@ -552,8 +552,9 @@ int main(int argc, char* argv[])
 	// HOME must exist because GlobalData's user-data path and the registry
 	// shim derive from it on the POSIX branch; Android doesn't set it.
 	{
-		// GX_GAME_DATA_DIR is set by GeneralsXZHActivity to the directory the in-app
-		// Steam download / folder import filled (or the legacy dir when found there).
+		// GeneralsX @feature HishamAbulfeilat 27/09/2026 GX_GAME_DATA_DIR is set by
+		// GeneralsXZHActivity to the directory the in-app Steam download / folder import
+		// filled (or the legacy dir when found there).
 		const char *dataDirEnv = getenv("GX_GAME_DATA_DIR");
 		const char *GX_ANDROID_ASSET_DIR = (dataDirEnv != nullptr && dataDirEnv[0] != '\0')
 			? dataDirEnv : "/sdcard/GeneralsZH";

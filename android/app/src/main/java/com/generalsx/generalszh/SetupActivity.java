@@ -8,6 +8,7 @@ import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -32,6 +33,7 @@ import in.dragonbra.javasteam.steam.authentication.IAuthenticator;
  *  - open the Steam store page to buy it.
  */
 public class SetupActivity extends Activity {
+    private static final String TAG = "GeneralsX";
     private static final int REQUEST_PICK_FOLDER = 1;
     private static final String STEAM_STORE_URL =
             "https://store.steampowered.com/app/" + GameDataPaths.STEAM_APP_ID + "/";
@@ -57,7 +59,8 @@ public class SetupActivity extends Activity {
             try {
                 GameDataPaths.installBundledFonts(this, dataDir);
             } catch (Exception e) {
-                // The engine falls back to its own lookup; not fatal.
+                // Not fatal: text renders only if fonts/ exists, so surface it in logcat.
+                Log.w(TAG, "Could not install bundled fonts into " + dataDir, e);
             }
         }
         Intent intent = new Intent(this, GeneralsXZHActivity.class);

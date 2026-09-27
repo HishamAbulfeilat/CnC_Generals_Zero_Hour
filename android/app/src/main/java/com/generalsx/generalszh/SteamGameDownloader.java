@@ -1,5 +1,7 @@
 package com.generalsx.generalszh;
 
+import android.util.Log;
+
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -109,8 +111,8 @@ final class SteamGameDownloader implements IDownloadListener {
         for (Closeable subscription : subscriptions) {
             try {
                 subscription.close();
-            } catch (IOException ignored) {
-                // Nothing useful to do while tearing down.
+            } catch (IOException e) {
+                Log.w("GeneralsX", "Closing a Steam callback subscription failed", e);
             }
         }
         if (!finished) {

@@ -43,6 +43,7 @@ cmake -S "${SRC_DIR}" -B "${BUILD_DIR}" -G Ninja \
     -DANDROID_ABI=arm64-v8a \
     -DANDROID_PLATFORM="android-${ANDROID_PLATFORM}" \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384" \
     -DBUILD_SHARED_LIBS=ON
 
 echo "==> Building"

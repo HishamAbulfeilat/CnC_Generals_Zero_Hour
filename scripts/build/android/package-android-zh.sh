@@ -74,6 +74,29 @@ echo "  embedded libvulkan_freedreno.so (Mesa Turnip driver)"
 # Versioned .so names (libSDL3.so.0) are not loadable from an APK: keep bare .so only.
 for f in "${JNILIBS}"/*.so.*; do [[ -e "$f" ]] && rm "$f"; done
 
+# 16 KB page alignment (Android 15+ 16 KB-page kernels refuse 4 KB-aligned .so; Play
+# requires it). Every library we build must have LOAD segments aligned to >= 0x4000.
+# The Turnip driver and the NDK's libc++_shared are prebuilt (we cannot relink them),
+# so they only warn.
+misaligned=0
+for f in "${JNILIBS}"/*.so; do
+    # Smallest alignment among the LOAD segments (readelf prints it as hex, e.g. 0x4000).
+    align=0
+    for a in $(readelf -lW "$f" | awk '$1 == "LOAD" { print $NF }'); do
+        (( align == 0 || a < align )) && align=$(( a ))
+    done
+    if (( align < 0x4000 )); then
+        if [[ "$(basename "$f")" == "libvulkan_freedreno.so" || "$(basename "$f")" == "libc++_shared.so" ]]; then
+            echo "  WARNING: prebuilt $(basename "$f") is ${align}-aligned (not 16 KB compatible)"
+        else
+            echo "  ERROR: $(basename "$f") LOAD alignment ${align} < 0x4000" >&2
+            misaligned=1
+        fi
+    fi
+done
+[[ ${misaligned} -eq 0 ]] || { echo "ERROR: 16 KB page alignment check failed" >&2; exit 1; }
+echo "  16 KB page alignment OK"
+
 # Fonts for the in-app setup flow: SetupActivity copies them into the game data dir
 # (the engine loads fonts/*.ttf from there). Metric-compatible Liberation fonts (SIL OFL).
 GX_FONTS="${ANDROID_DIR}/app/src/main/assets/fonts" "${PROJECT_ROOT}/scripts/build/ios/stage-fonts.sh"
