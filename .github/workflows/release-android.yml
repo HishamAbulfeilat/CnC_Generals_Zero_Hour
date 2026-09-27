@@ -10,6 +10,9 @@ on:
   workflow_dispatch:
   push:
     tags: ['android-v*']
+    # Build the APK artifact on pushes to the Android port branch; the Release
+    # step below stays tag-only.
+    branches: ['claude/cloud-vs-device-access-hhykct']
 
 permissions:
   contents: write
