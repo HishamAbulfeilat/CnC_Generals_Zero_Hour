@@ -3,6 +3,7 @@ package com.generalsx.generalszh;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -28,7 +29,8 @@ import in.dragonbra.javasteam.steam.authentication.IAuthenticator;
 /**
  * Launcher. Starts the game straight away when the retail data is present; otherwise
  * offers the ways to get a legitimate copy onto the device:
- *  - download it from the user's own Steam account (SteamGameDownloader),
+ *  - download it from the user's own Steam account (DownloadService runs
+ *    SteamGameDownloader in the background; the Steam login is remembered),
  *  - import a folder already on the device, SD card or USB stick (FolderImporter),
  *  - open the Steam store page to buy it.
  */
@@ -45,7 +47,11 @@ public class SetupActivity extends Activity {
     private ProgressBar progress;
     private TextView intro;
     private LinearLayout buttons;
+    private Button pauseButton;
     private boolean busy;
+    /** Download state already acted on (dialog shown / game launched); survives recreation. */
+    private static DownloadService.State acknowledged;
+    private final DialogAuthenticator authenticator = new DialogAuthenticator();
     /** Usable game data directory, or null while the game still has to be set up. */
     private File readyDataDir;
 
@@ -59,6 +65,38 @@ public class SetupActivity extends Activity {
         } else {
             showSetup();
         }
+        DownloadService.setUiAuthenticator(authenticator);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        DownloadService.setObserver(this::onDownloadState);
+        // A download interrupted by the app being closed or killed resumes on its own
+        // with the saved Steam login.
+        if (!DownloadService.state().running && DownloadService.isPending(this)
+                && SteamLoginStore.savedAccountName(this) != null) {
+            DownloadService.startWithSavedLogin(this);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        DownloadService.setObserver(null);
+        super.onPause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        DownloadService.clearUiAuthenticator(authenticator);
+        super.onDestroy();
+    }
+
+    /** This screen follows the device rotation (the game itself is landscape-only). */
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        layoutButtons();
     }
 
     private void launchGame(File dataDir) {
@@ -104,7 +142,6 @@ public class SetupActivity extends Activity {
         root.addView(intro);
 
         buttons = new LinearLayout(this);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
         root.addView(buttons);
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -113,6 +150,14 @@ public class SetupActivity extends Activity {
         progress.setPadding(0, dp(16), 0, 0);
         root.addView(progress, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        pauseButton = new Button(this);
+        pauseButton.setText("Pause download");
+        pauseButton.setAllCaps(false);
+        pauseButton.setVisibility(View.GONE);
+        pauseButton.setOnClickListener(v -> DownloadService.pause(this));
+        root.addView(pauseButton, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         status = new TextView(this);
         status.setTextColor(Color.LTGRAY);
@@ -134,6 +179,7 @@ public class SetupActivity extends Activity {
         buttons.addView(button("Add maps", v -> pickMapsFolder()));
         buttons.addView(button("C&C Online account", v -> openUrl(CNC_ONLINE_REGISTER_URL)));
         buttons.addView(button("Re-import game files", v -> showSetup()));
+        layoutButtons();
         status.setText("Online play uses C&C Online: create a free account, then sign in with it"
                 + " on the in-game Online login screen.\n"
                 + "Add maps: pick a map folder (it contains a .map file) or a folder of map folders."
@@ -145,11 +191,21 @@ public class SetupActivity extends Activity {
         intro.setText("This app is the game engine only. It needs the game files from your own "
                 + "copy of Zero Hour (Steam, EA App or retail CD). Choose how to get them:");
         buttons.removeAllViews();
-        buttons.addView(button("Download from Steam", v -> askSteamCredentials()));
+        String account = SteamLoginStore.savedAccountName(this);
+        buttons.addView(button(account != null ? "Download from Steam (" + account + ")"
+                : "Download from Steam", v -> onDownloadFromSteam()));
         buttons.addView(button("Import from folder", v -> pickFolder()));
         buttons.addView(button("Buy on Steam", v -> openUrl(STEAM_STORE_URL)));
-        status.setText("Download from Steam: sign in with the Steam account that owns Zero Hour. "
-                + "Your password goes only to Steam and is not saved.\n"
+        if (account != null) {
+            buttons.addView(button("Sign out of Steam", v -> {
+                SteamLoginStore.clear(this);
+                showSetup();
+            }));
+        }
+        layoutButtons();
+        status.setText("Download from Steam: sign in once with the Steam account that owns Zero Hour."
+                + " The login is remembered (encrypted on this device, the password is never saved)."
+                + " The download continues in the background and resumes if interrupted.\n"
                 + "Import from folder: copy your PC install folder to the device, SD card or "
                 + "USB stick first, then pick it here.");
     }
@@ -163,17 +219,33 @@ public class SetupActivity extends Activity {
         b.setText(label);
         b.setAllCaps(false);
         b.setOnClickListener(onClick);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        lp.setMargins(0, 0, dp(12), 0);
-        b.setLayoutParams(lp);
         return b;
     }
 
+    /** One row of buttons in landscape; a full-width column in portrait. */
+    private void layoutButtons() {
+        boolean portrait = getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_PORTRAIT;
+        buttons.setOrientation(portrait ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        for (int i = 0; i < buttons.getChildCount(); i++) {
+            LinearLayout.LayoutParams lp = portrait
+                    ? new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT)
+                    : new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            lp.setMargins(0, 0, portrait ? 0 : dp(12), portrait ? dp(8) : 0);
+            buttons.getChildAt(i).setLayoutParams(lp);
+        }
+    }
+
     private void setBusy(boolean value) {
+        setBusy(value, false);
+    }
+
+    private void setBusy(boolean value, boolean pausable) {
         busy = value;
         buttons.setVisibility(value ? View.GONE : View.VISIBLE);
         progress.setVisibility(value ? View.VISIBLE : View.GONE);
+        pauseButton.setVisibility(value && pausable ? View.VISIBLE : View.GONE);
         progress.setIndeterminate(true);
         if (value) {
             // A multi-GB transfer; don't let the screen sleep and pause the app.
@@ -233,7 +305,8 @@ public class SetupActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (!busy) {
+        // A Steam download keeps running in the background service, so leaving is fine then.
+        if (!busy || DownloadService.state().running) {
             super.onBackPressed();
         }
     }
@@ -269,34 +342,54 @@ public class SetupActivity extends Activity {
                 .show();
     }
 
-    private void startSteamDownload(String username, String password) {
-        File dest = GameDataPaths.appDataDir(this);
-        if (!checkFreeSpace(dest)) {
+    private void onDownloadFromSteam() {
+        if (!checkFreeSpace(GameDataPaths.appDataDir(this))) {
             return;
         }
-        setBusy(true);
-        new SteamGameDownloader(username, password, new DialogAuthenticator(), dest,
-                new SteamGameDownloader.Listener() {
-                    @Override
-                    public void onStatus(String message) {
-                        showStatus(message);
-                    }
+        if (SteamLoginStore.savedAccountName(this) != null) {
+            setBusy(true, true);
+            DownloadService.startWithSavedLogin(this);
+        } else {
+            askSteamCredentials();
+        }
+    }
 
-                    @Override
-                    public void onProgress(float fraction) {
-                        showProgress(fraction);
-                    }
+    private void startSteamDownload(String username, String password) {
+        setBusy(true, true);
+        DownloadService.startWithCredentials(this, username, password);
+    }
 
-                    @Override
-                    public void onFinished(File installDir) {
-                        onSetupFinished(installDir);
-                    }
-
-                    @Override
-                    public void onFailed(String message) {
-                        onSetupFailed(message);
-                    }
-                }).start();
+    /** Mirrors the background download on this screen (main thread, while resumed). */
+    private void onDownloadState(DownloadService.State s) {
+        if (s.running) {
+            setBusy(true, true);
+            if (s.status != null) {
+                status.setText(s.progress >= 0
+                        ? Math.round(s.progress * 100) + "% · " + s.status : s.status);
+            }
+            showProgress(s.progress);
+            return;
+        }
+        if (s == acknowledged) {
+            return; // already handled before this screen was (re)opened
+        }
+        if (s.completedDir != null) {
+            acknowledged = s;
+            setBusy(false);
+            launchGame(s.completedDir);
+        } else if (s.error != null) {
+            acknowledged = s;
+            setBusy(false);
+            showSetup();
+            status.setText(s.error);
+            if (!s.error.startsWith("Download paused")) {
+                new AlertDialog.Builder(this)
+                        .setTitle("Download did not finish")
+                        .setMessage(s.error)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show();
+            }
+        }
     }
 
     /** Steam Guard prompts, shown as dialogs; JavaSteam waits on the returned futures. */
