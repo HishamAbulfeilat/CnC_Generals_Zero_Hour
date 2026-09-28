@@ -7,5 +7,7 @@
     <base-config cleartextTrafficPermitted="false" />
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">cnc-online.net</domain>
+        <!-- Retail servserv host, fetched through C&C Online's server (CncOnlineFiles). -->
+        <domain includeSubdomains="false">servserv.generals.ea.com</domain>
     </domain-config>
 </network-security-config>

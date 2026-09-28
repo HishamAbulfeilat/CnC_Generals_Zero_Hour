@@ -101,6 +101,15 @@ echo "  16 KB page alignment OK"
 # (the engine loads fonts/*.ttf from there). Metric-compatible Liberation fonts (SIL OFL).
 GX_FONTS="${ANDROID_DIR}/app/src/main/assets/fonts" "${PROJECT_ROOT}/scripts/build/ios/stage-fonts.sh"
 
+# GeneralsX @build HishamAbulfeilat 28/09/2026 Loose game files this port adds, copied into the
+# game data dir by SetupActivity (local files override BIG archives), as
+# deploy-linux-zh.sh does on Linux: ExtrasMenu.wnd backs the Options menu's Extras button.
+GAMEDATA_ASSETS="${ANDROID_DIR}/app/src/main/assets/gamedata"
+rm -rf "${GAMEDATA_ASSETS}"
+mkdir -p "${GAMEDATA_ASSETS}/Window/Menus"
+cp "${PROJECT_ROOT}/GeneralsZH/Data/Window/Menus/ExtrasMenu.wnd" "${GAMEDATA_ASSETS}/Window/Menus/"
+echo "  staged gamedata/Window/Menus/ExtrasMenu.wnd"
+
 mkdir -p "${SDL_JAVA_DST}"
 cp -R "${SDL_JAVA_SRC}/org" "${SDL_JAVA_DST}/"
 echo "  copied SDL3 Java glue"

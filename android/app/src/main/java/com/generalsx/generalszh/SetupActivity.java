@@ -51,8 +51,12 @@ public class SetupActivity extends Activity {
     private static final int REQUEST_SAVE_LOGS = 3;
     private static final String STEAM_STORE_URL =
             "https://store.steampowered.com/app/" + GameDataPaths.STEAM_APP_ID + "/";
-    /** C&C Online (the GameSpy replacement the online menus connect to) account sign-up. */
-    private static final String CNC_ONLINE_REGISTER_URL = "https://cnc-online.net/en/connect/register/";
+    /**
+     * C&C Online (the GameSpy replacement the online menus connect to) setup guide, which
+     * leads to account sign-up and the "server login" the game uses. The old
+     * /en/connect/register/ page now answers 404.
+     */
+    private static final String CNC_ONLINE_REGISTER_URL = "https://cnc-online.net/en/setup/";
 
     private TextView status;
     private ProgressBar progress;
@@ -119,9 +123,10 @@ public class SetupActivity extends Activity {
         if (!dataDir.getAbsolutePath().equals(GameDataPaths.LEGACY_DIR)) {
             try {
                 GameDataPaths.installBundledFonts(this, dataDir);
+                GameDataPaths.installBundledGameFiles(this, dataDir);
             } catch (Exception e) {
-                // Not fatal: text renders only if fonts/ exists, so surface it in logcat.
-                Log.w(TAG, "Could not install bundled fonts into " + dataDir, e);
+                // Not fatal (text renders only if fonts/ exists; Extras needs its .wnd), so log it.
+                Log.w(TAG, "Could not install bundled fonts/game files into " + dataDir, e);
             }
         }
         Intent intent = new Intent(this, GeneralsXZHActivity.class);
@@ -192,6 +197,7 @@ public class SetupActivity extends Activity {
         intro.setText("Ready to play.");
         buttonList.clear();
         buttonList.add(button("Play", v -> launchGame(readyDataDir)));
+        buttonList.add(button("Settings", v -> startActivity(new Intent(this, SettingsActivity.class))));
         buttonList.add(button("Mods", v -> startActivity(new Intent(this, ModsActivity.class))));
         buttonList.add(button("Add maps", v -> pickMapsFolder()));
         buttonList.add(button("Update game files", v -> onUpdateGameFiles()));

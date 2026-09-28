@@ -925,6 +925,10 @@ Real OptionPreferences::getTerrainDrawDistanceScale() const
 		return TheGlobalData->m_terrainDrawDistanceScale;
 
 	Real val = (Real)atof(it->second.str());
+	// GeneralsX @bugfix HishamAbulfeilat 28/09/2026 The Extras menu stores a percentage
+	// (e.g. "105"); read as a scale it always clamped to the 2.0 maximum.
+	if (val > 2.0f)
+		val /= 100.0f;
 	if (val < 1.0f)
 		val = 1.0f;
 	if (val > 2.0f)

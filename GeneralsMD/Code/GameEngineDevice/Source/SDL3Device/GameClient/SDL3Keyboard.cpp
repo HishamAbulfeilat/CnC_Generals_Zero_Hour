@@ -247,6 +247,11 @@ KeyVal SDL3Keyboard::translateScanCodeToKeyVal(unsigned char scan)
 	// GeneralsX @bugfix felipebraz 01/04/2026 Restore editing/navigation keys required by GUI widgets.
 	switch ((SDL_Scancode)scan) {
 		case SDL_SCANCODE_ESCAPE: return KEY_ESC;      // GeneralsX @bugfix BenderAI 13/02/2026 Fix key constant name
+#if defined(__ANDROID__)
+		// GeneralsX @feature HishamAbulfeilat 28/09/2026 Android Back (trapped in SDL3Main.cpp)
+		// acts as Esc: opens the in-game menu / leaves the current screen.
+		case SDL_SCANCODE_AC_BACK: return KEY_ESC;
+#endif
 		case SDL_SCANCODE_RETURN: return KEY_ENTER;    // GeneralsX @bugfix BenderAI 13/02/2026 Fix key constant name
 		case SDL_SCANCODE_KP_ENTER: return KEY_KPENTER;
 		case SDL_SCANCODE_SPACE: return KEY_SPACE;

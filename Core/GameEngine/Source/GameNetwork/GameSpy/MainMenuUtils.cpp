@@ -188,10 +188,20 @@ static void startOnline()
 
 	if (cantConnectBeforeOnline)
 	{
+#ifdef _WIN32
 		MessageBoxOk(TheGameText->fetch("GUI:CannotConnectToServservTitle"),
 			TheGameText->fetch("GUI:CannotConnectToServserv"),
 			noPatchBeforeOnlineCallback);
 		return;
+#else
+		// GeneralsX @bugfix HishamAbulfeilat 28/09/2026 Servserv only offers Windows patch
+		// installers (ignored here, see gamePatchCheckCallback), the message of the day and an
+		// optional config; SetUpGameSpy runs fine without the last two. Refusing to go online
+		// when it is unreachable (C&C Online answered HTTP 404) locked players out of the
+		// login screen, so carry on to it.
+		DEBUG_LOG(("Servserv unreachable; going online without MOTD/config"));
+		cantConnectBeforeOnline = FALSE;
+#endif
 	}
 	if (!queuedDownloads.empty())
 	{
@@ -308,6 +318,24 @@ static void queuePatch(Bool mandatory, AsciiString downloadURL)
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
+// GeneralsX @bugfix HishamAbulfeilat 28/09/2026 Servserv requests keep the retail host in the
+// URL and Host header (FormatURLFromRegistry) but connect to the replacement service's HTTP
+// server, like the C&C Online launcher's DNS redirect on PC does. Its servserv files are
+// served for that host: asking for them as http.<service> directly returns HTTP 404.
+static void routeServservRequest(GHTTPRequest request)
+{
+#ifdef RTS_GAMESPY_SERVER_NAME
+	if (request >= 0)
+	{
+		ghttpSetRequestProxy(request, ONLINE_SERVSERV_HOST);
+	}
+#else
+	(void)request;
+#endif
+}
+
+///////////////////////////////////////////////////////////////////////////////////////
+
 static GHTTPBool motdCallback( GHTTPRequest request, GHTTPResult result,
 															char * buffer, GHTTPByteCount bufferLen, void * param )
 {
@@ -319,9 +347,15 @@ static GHTTPBool motdCallback( GHTTPRequest request, GHTTPResult result,
 	}
 
 	delete[] MOTDBuffer;
-	MOTDBuffer = NEW char[bufferLen];
-	memcpy(MOTDBuffer, buffer, bufferLen);
-	MOTDBuffer[bufferLen-1] = 0;
+	MOTDBuffer = nullptr;
+	// GeneralsX @bugfix HishamAbulfeilat 28/09/2026 A failed request (e.g. HTTP 404) can come
+	// back with no body: bufferLen 0 made MOTDBuffer[bufferLen-1] write before the buffer.
+	if (result == GHTTPSuccess && buffer != nullptr && bufferLen > 0)
+	{
+		MOTDBuffer = NEW char[bufferLen];
+		memcpy(MOTDBuffer, buffer, bufferLen);
+		MOTDBuffer[bufferLen-1] = 0;
+	}
 
 	--checksLeftBeforeOnline;
 	DEBUG_ASSERTCRASH(checksLeftBeforeOnline>=0, ("Too many callbacks"));
@@ -483,7 +517,7 @@ static GHTTPBool configHeadCallback( GHTTPRequest request, GHTTPResult result,
 	std::string gameURL, mapURL;
 	std::string configURL, motdURL;
 	FormatURLFromRegistry(gameURL, mapURL, configURL, motdURL);
-	ghttpGet( configURL.c_str(), GHTTPFalse, configCallback, param );
+	routeServservRequest(ghttpGet( configURL.c_str(), GHTTPFalse, configCallback, param ));
 
 	return GHTTPTrue;
 }
@@ -882,10 +916,10 @@ static void reallyStartPatchCheck()
 	DEBUG_LOG(("Map patch check: [%s]", mapURL.c_str()));
 	DEBUG_LOG(("Config: [%s]", configURL.c_str()));
 	DEBUG_LOG(("MOTD: [%s]", motdURL.c_str()));
-	ghttpGet(gameURL.c_str(), GHTTPFalse, gamePatchCheckCallback, reinterpret_cast<void*>(std::uintptr_t(timeThroughOnline)));
-	ghttpGet(mapURL.c_str(), GHTTPFalse, gamePatchCheckCallback, reinterpret_cast<void*>(std::uintptr_t(timeThroughOnline)));
-	ghttpHead(configURL.c_str(), GHTTPFalse, configHeadCallback, reinterpret_cast<void*>(std::uintptr_t(timeThroughOnline)));
-	ghttpGet(motdURL.c_str(), GHTTPFalse, motdCallback, reinterpret_cast<void*>(std::uintptr_t(timeThroughOnline)));
+	routeServservRequest(ghttpGet(gameURL.c_str(), GHTTPFalse, gamePatchCheckCallback, reinterpret_cast<void*>(std::uintptr_t(timeThroughOnline))));
+	routeServservRequest(ghttpGet(mapURL.c_str(), GHTTPFalse, gamePatchCheckCallback, reinterpret_cast<void*>(std::uintptr_t(timeThroughOnline))));
+	routeServservRequest(ghttpHead(configURL.c_str(), GHTTPFalse, configHeadCallback, reinterpret_cast<void*>(std::uintptr_t(timeThroughOnline))));
+	routeServservRequest(ghttpGet(motdURL.c_str(), GHTTPFalse, motdCallback, reinterpret_cast<void*>(std::uintptr_t(timeThroughOnline))));
 
 	// check total game stats
 	CheckOverallStats();

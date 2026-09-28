@@ -1,6 +1,9 @@
 package com.generalsx.generalszh;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -16,8 +19,16 @@ import java.util.Locale;
  * listed.
  */
 final class CncOnlineFiles {
-    private static final String BASE =
-            "http://http.server.cnc-online.net/servserv/GeneralsZH/";
+    /**
+     * The retail servserv URL, fetched through C&C Online's HTTP server as a proxy: the service
+     * serves these files for the retail host name (what the PC launcher's DNS redirect sends),
+     * and answers HTTP 404 when asked for them as http.server.cnc-online.net. Same routing as
+     * the game (MainMenuUtils.cpp routeServservRequest).
+     */
+    private static final String RETAIL_BASE = "http://servserv.generals.ea.com/servserv/GeneralsZH/";
+    private static final String SERVICE_HOST = "http.server.cnc-online.net";
+    /** Fallback: the same tree addressed to the service directly. */
+    private static final String DIRECT_BASE = "http://" + SERVICE_HOST + "/servserv/GeneralsZH/";
 
     static final class Entry {
         final String url;
@@ -44,6 +55,8 @@ final class CncOnlineFiles {
         String motd;
         String motdError;
         boolean configReachable;
+        /** Number of patch lists (game, map pack) that were read; 0 means "unknown". */
+        int patchListsRead;
         final List<Entry> entries = new ArrayList<>();
         final List<String> errors = new ArrayList<>();
     }
@@ -53,34 +66,49 @@ final class CncOnlineFiles {
     static Result fetch() {
         Result r = new Result();
         try {
-            r.motd = ModCatalog.get(BASE + "MOTD-english.txt").trim();
+            r.motd = get("MOTD-english.txt").trim();
         } catch (IOException e) {
             r.motdError = e.getMessage();
         }
         try {
-            ModCatalog.get(BASE + "config.txt");
+            get("config.txt");
             r.configReachable = true;
         } catch (IOException e) {
             r.errors.add("config.txt: " + e.getMessage());
         }
         // Retail 1.04 registry values (Version 0x00010004, MapPackVersion 0x00010000).
-        readPatchList(r, BASE + "english-" + 0x00010004 + ".txt");
-        readPatchList(r, BASE + "maps-" + 0x00010000 + ".txt");
+        readPatchList(r, "english-" + 0x00010004 + ".txt");
+        readPatchList(r, "maps-" + 0x00010000 + ".txt");
         return r;
     }
 
-    private static void readPatchList(Result r, String url) {
+    private static void readPatchList(Result r, String name) {
         String body;
         try {
-            body = ModCatalog.get(url);
+            body = get(name);
         } catch (IOException e) {
-            r.errors.add(url.substring(url.lastIndexOf('/') + 1) + ": " + e.getMessage());
+            r.errors.add(name + ": " + e.getMessage());
             return;
         }
+        r.patchListsRead++;
         for (String line : body.split("\r?\n")) {
             String[] parts = line.trim().split("\\s+");
             if (parts.length >= 3 && parts[0].equals("patch")) {
                 r.entries.add(new Entry(parts[2], !parts[1].equals("0")));
+            }
+        }
+    }
+
+    /** Fetches a servserv file the way the game does, then directly if that fails. */
+    private static String get(String name) throws IOException {
+        Proxy service = new Proxy(Proxy.Type.HTTP, new InetSocketAddress(SERVICE_HOST, 80));
+        try {
+            return ModCatalog.read(ModCatalog.open(new URL(RETAIL_BASE + name), service));
+        } catch (IOException viaRetailHost) {
+            try {
+                return ModCatalog.get(DIRECT_BASE + name);
+            } catch (IOException direct) {
+                throw new IOException(viaRetailHost.getMessage() + "; direct: " + direct.getMessage(), direct);
             }
         }
     }

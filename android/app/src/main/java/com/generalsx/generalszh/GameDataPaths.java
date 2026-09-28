@@ -145,6 +145,47 @@ final class GameDataPaths {
      * (render2dsentence.cpp). The APK bundles metric-compatible Liberation fonts
      * (staged by scripts/build/ios/stage-fonts.sh); copy any that are missing.
      */
+    /**
+     * Copies the loose game files this port adds (APK assets under {@code gamedata/}, staged by
+     * package-android-zh.sh, e.g. Window/Menus/ExtrasMenu.wnd) into the data directory.
+     * Rewritten when the size differs, so an app update ships a changed file.
+     */
+    static void installBundledGameFiles(Context context, File dataDir) throws IOException {
+        copyAssetTree(context.getAssets(), "gamedata", dataDir, new byte[64 * 1024]);
+    }
+
+    private static void copyAssetTree(AssetManager assets, String path, File dst, byte[] buffer)
+            throws IOException {
+        String[] children = assets.list(path);
+        if (children == null) {
+            return;
+        }
+        if (children.length == 0) {
+            // A file (assets.list returns an empty array for files).
+            long size;
+            try (InputStream probe = assets.open(path)) {
+                size = probe.available();
+            }
+            if (dst.isFile() && dst.length() == size) {
+                return;
+            }
+            File parent = dst.getParentFile();
+            if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+                throw new IOException("Cannot create " + parent);
+            }
+            try (InputStream in = assets.open(path); OutputStream out = new FileOutputStream(dst)) {
+                int n;
+                while ((n = in.read(buffer)) > 0) {
+                    out.write(buffer, 0, n);
+                }
+            }
+            return;
+        }
+        for (String child : children) {
+            copyAssetTree(assets, path + "/" + child, new File(dst, child), buffer);
+        }
+    }
+
     static void installBundledFonts(Context context, File dataDir) throws IOException {
         AssetManager assets = context.getAssets();
         String[] fonts = assets.list("fonts");

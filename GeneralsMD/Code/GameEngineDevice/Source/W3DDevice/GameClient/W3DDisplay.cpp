@@ -603,6 +603,32 @@ static void buildFilteredResolutions()
 	float density = 1.0f;
 	DX8Wrapper::GetNativeDisplaySize(nativeW, nativeH, density);
 
+#if defined(__ANDROID__)
+	// GeneralsX @feature HishamAbulfeilat 28/09/2026 Phones report a single display mode (the
+	// panel), and the desktop list below clamps widths to 16:9, so the Options menu offered
+	// nothing to choose (and never the panel's own ~20:9 shape). Offer the panel's aspect
+	// ratio plus 16:9 and 4:3 at common heights; the pillarbox scales any of them to the
+	// screen (letterboxed when the aspect differs), so lower ones trade sharpness for speed.
+	if (nativeW > 0 && nativeH > 0) {
+		const Int panelW = nativeW > nativeH ? nativeW : nativeH;
+		const Int panelH = nativeW > nativeH ? nativeH : nativeW;
+		const Int heights[] = { panelH, 1440, 1200, 1080, 900, 768, 720, 600 };
+		for (Int h : heights) {
+			if (h > panelH || h < 600) continue;
+			const Int widths[] = { (Int)((Int64)h * panelW / panelH) & ~1, h * 16 / 9, h * 4 / 3 };
+			for (Int w : widths) {
+				bool duplicate = false;
+				for (const auto& e : s_filteredResolutions) {
+					if (e.w == w && e.h == h) { duplicate = true; break; }
+				}
+				if (!duplicate) s_filteredResolutions.push_back({w, h, 32});
+			}
+		}
+		s_filteredDirty = false;
+		return;
+	}
+#endif
+
 	// GeneralsX @android - Some mobile drivers (e.g. Samsung Xclipse via DXVK)
 	// enumerate zero acceptable display modes, so Enumerate_Devices() adds no
 	// entry to the render-device table. Get_Render_Device_Desc(0) would then

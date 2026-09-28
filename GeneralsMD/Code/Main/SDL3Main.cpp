@@ -296,6 +296,37 @@ static void gxRedirectStdioToLogcat()
 	}
 }
 
+// GeneralsX @bugfix HishamAbulfeilat 28/09/2026 True when the player's Options.ini (in the
+// engine's user data folder, $XDG_DATA_HOME/GeneralsX/GeneralsZH/, see
+// GlobalData::getPath_UserData) holds a "Resolution" entry.
+static bool gxOptionsHaveResolution()
+{
+	const char *dataHome = getenv("XDG_DATA_HOME");
+	if (dataHome == nullptr) {
+		return false;
+	}
+	char path[600];
+	snprintf(path, sizeof(path), "%s/GeneralsX/GeneralsZH/Options.ini", dataHome);
+	FILE *fp = fopen(path, "r");
+	if (fp == nullptr) {
+		return false;
+	}
+	bool found = false;
+	char line[256];
+	while (!found && fgets(line, sizeof(line), fp) != nullptr) {
+		const char *p = line;
+		while (*p == ' ' || *p == '\t') ++p;
+		if (strncmp(p, "Resolution", 10) == 0) {
+			p += 10;
+			while (*p == ' ' || *p == '\t') ++p;
+			int w = 0, h = 0;
+			found = *p == '=' && sscanf(p + 1, "%d %d", &w, &h) == 2 && w > 0 && h > 0;
+		}
+	}
+	fclose(fp);
+	return found;
+}
+
 // GeneralsX @feature HishamAbulfeilat 28/09/2026 Native crash report.
 // A crash (SIGSEGV/SIGABRT/...) writes the signal, fault address and a backtrace of
 // library+offset frames to game.log and logcat, then hands the signal back to the
@@ -993,6 +1024,13 @@ int main(int argc, char* argv[])
 		// GeneralsX @android FadiLabib 07/07/2026 - Android uses the same translator.
 		SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 #endif
+#if defined(__ANDROID__)
+		// GeneralsX @bugfix HishamAbulfeilat 28/09/2026 Without this, Android's Back gesture (an
+		// edge swipe, easy to trigger by accident mid-battle) finished the activity and closed
+		// the game. Trapped, it arrives as SDL_SCANCODE_AC_BACK, which SDL3Keyboard maps to Esc
+		// (the in-game menu), and a mouse's right button stays a right click.
+		SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+#endif
 		if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
 			fprintf(stderr, "FATAL: Failed to initialize SDL3: %s\n", SDL_GetError());
 			return 1;
@@ -1093,6 +1131,14 @@ int main(int argc, char* argv[])
 					break;
 				}
 			}
+#if defined(__ANDROID__)
+			// GeneralsX @bugfix HishamAbulfeilat 28/09/2026 A resolution picked in the Options
+			// menu (or the launcher's settings) is saved to Options.ini; forcing the panel size
+			// on every start discarded it. Only fill the screen when none was chosen yet.
+			if (!userSetRes && gxOptionsHaveResolution()) {
+				userSetRes = true;
+			}
+#endif
 			// Use the pixel size of the high-density drawable: the game renders
 			// 1:1 into the native-resolution swapchain, and fonts/UI rescale via
 			// the engine's resolution-aware font scaling (GlobalLanguage).

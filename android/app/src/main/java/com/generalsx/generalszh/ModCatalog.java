@@ -8,6 +8,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.Proxy;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
@@ -95,7 +96,11 @@ final class ModCatalog {
     }
 
     static String get(String url) throws IOException {
-        HttpURLConnection conn = open(url);
+        return read(open(url));
+    }
+
+    /** Reads a response body as UTF-8 and disconnects. */
+    static String read(HttpURLConnection conn) throws IOException {
         try (InputStream in = conn.getInputStream()) {
             ByteArrayOutputStream buf = new ByteArrayOutputStream();
             byte[] b = new byte[16 * 1024];
@@ -110,7 +115,11 @@ final class ModCatalog {
     }
 
     static HttpURLConnection open(String url) throws IOException {
-        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        return open(new URL(url), Proxy.NO_PROXY);
+    }
+
+    static HttpURLConnection open(URL url, Proxy proxy) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection(proxy);
         conn.setConnectTimeout(15000);
         conn.setReadTimeout(60000);
         conn.setInstanceFollowRedirects(true);
@@ -118,7 +127,7 @@ final class ModCatalog {
         int code = conn.getResponseCode();
         if (code != HttpURLConnection.HTTP_OK) {
             conn.disconnect();
-            throw new IOException("HTTP " + code + " from " + new URL(url).getHost());
+            throw new IOException("HTTP " + code + " from " + url.getHost());
         }
         return conn;
     }

@@ -34,6 +34,7 @@ import org.libsdl.app.SDLActivity;
 final class TouchKeyBar {
     private static final String PREFS = "touch_key_bar";
     private static final String KEY_EXPANDED = "expanded";
+    private static final String KEY_HIDDEN = "hidden";
     private static final int IDLE_COLOR = 0x99202020;
     private static final int HELD_COLOR = 0xCCB06000;
 
@@ -68,6 +69,16 @@ final class TouchKeyBar {
     private TouchKeyBar(Activity activity, LinearLayout keys) {
         this.activity = activity;
         this.keys = keys;
+    }
+
+    /** Whether the player turned the bar off (Settings, "On-screen keys"). */
+    static boolean isHidden(android.content.Context context) {
+        return context.getSharedPreferences(PREFS, Activity.MODE_PRIVATE).getBoolean(KEY_HIDDEN, false);
+    }
+
+    static void setHidden(android.content.Context context, boolean hidden) {
+        context.getSharedPreferences(PREFS, Activity.MODE_PRIVATE).edit()
+                .putBoolean(KEY_HIDDEN, hidden).apply();
     }
 
     /** Adds the bar on top of the game surface in {@code layout} (SDLActivity's RelativeLayout). */

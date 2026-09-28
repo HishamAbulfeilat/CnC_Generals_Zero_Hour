@@ -42,7 +42,7 @@ public class GeneralsXZHActivity extends SDLActivity {
             }
         }
         super.onCreate(savedInstanceState);
-        if (mLayout != null) {
+        if (mLayout != null && !TouchKeyBar.isHidden(this)) {
             keyBar = TouchKeyBar.attach(this, mLayout);
         }
     }

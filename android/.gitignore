@@ -6,3 +6,4 @@ local.properties
 gradle/
 gradlew*
 app/src/main/assets/fonts/
+app/src/main/assets/gamedata/

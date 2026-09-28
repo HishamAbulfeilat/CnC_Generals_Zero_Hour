@@ -166,11 +166,14 @@ final class CrashLogs {
             case ApplicationExitInfo.REASON_CRASH:
             case ApplicationExitInfo.REASON_CRASH_NATIVE:
             case ApplicationExitInfo.REASON_ANR:
+            case ApplicationExitInfo.REASON_INITIALIZATION_FAILURE:
+                return true;
             case ApplicationExitInfo.REASON_LOW_MEMORY:
             case ApplicationExitInfo.REASON_SIGNALED:
             case ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE:
-            case ApplicationExitInfo.REASON_INITIALIZATION_FAILURE:
-                return true;
+                // Android routinely ends apps sitting in the background; only a kill while the
+                // game was on screen is worth reporting.
+                return e.getImportance() <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE;
             case ApplicationExitInfo.REASON_EXIT_SELF:
                 // The engine's fatal-error path (ReleaseCrash) ends with _exit(1).
                 return e.getStatus() != 0;

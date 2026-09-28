@@ -27,6 +27,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Mods screen: installed mods with on/off switches, the Super Patch download, custom mods
@@ -281,7 +282,9 @@ public class ModsActivity extends Activity {
                 : "No message of the day" + (r.motdError != null ? " (" + r.motdError + ")" : "") + ".");
         sb.append("\n\nOnline config: ").append(r.configReachable ? "reachable" : "not reachable");
         List<CncOnlineFiles.Entry> installable = new ArrayList<>();
-        if (r.entries.isEmpty()) {
+        if (r.entries.isEmpty() && r.patchListsRead == 0) {
+            sb.append("\nPatch lists could not be read.");
+        } else if (r.entries.isEmpty()) {
             sb.append("\nNo patches or map packs offered for version 1.04: you are up to date.");
         } else {
             sb.append("\n\nOffered files:");
@@ -317,7 +320,7 @@ public class ModsActivity extends Activity {
                 HttpURLConnection conn = ModCatalog.open(e.url);
                 try (InputStream in = new ProgressInputStream(conn.getInputStream(),
                         conn.getContentLengthLong(), this::showProgress)) {
-                    if (name.toLowerCase().endsWith(".zip")) {
+                    if (name.toLowerCase(Locale.ROOT).endsWith(".zip")) {
                         mods.installZip(id, name, "From C&C Online", "cnconline", "", in);
                     } else {
                         File staging = mods.newStaging(id);
