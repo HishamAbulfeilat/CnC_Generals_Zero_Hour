@@ -1,0 +1,111 @@
+name: Build Super Patch
+
+# TheSuperHackers' GeneralsGamePatch ("Super Patch", GPL v3) publishes no releases:
+# players build it with the Mod Builder, which runs on Windows. Build it here from the
+# latest upstream main and publish the English packs as a release of this repository,
+# so the Android app's mod manager can download it ("superpatch-<upstream commit>",
+# never marked latest, so the app updater keeps finding the APK releases).
+#
+# Runs when this workflow changes on the Android port branch, weekly (once this file is
+# on the default branch), or by hand.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'
+  push:
+    branches: ['claude/cloud-vs-device-access-hhykct']
+    paths: ['.github/workflows/build-super-patch.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  superpatch:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout GeneralsGamePatch (with the Mod Builder submodule)
+        uses: actions/checkout@v4
+        with:
+          repository: TheSuperHackers/GeneralsGamePatch
+          path: ggp
+          submodules: recursive
+
+      - name: Upstream version
+        id: upstream
+        shell: bash
+        run: |
+          sha="$(git -C ggp rev-parse --short=7 HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=superpatch-$sha" >> "$GITHUB_OUTPUT"
+          echo "subject=$(git -C ggp log -1 --format=%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if this upstream commit is already published
+        id: exists
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.upstream.outputs.tag }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "${{ steps.upstream.outputs.tag }} already published; nothing to do."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Same invocation as Patch104pZH/Scripts/BuildRelease.bat, minus its UAC/pause
+      # wrappers (the runner is already elevated and non-interactive). The Mod Builder
+      # installs uv/Python and downloads its tools (crunch, gametextcompiler,
+      # generalsbigcreator, Blender) on first use.
+      - name: Build release packs
+        if: steps.exists.outputs.published == 'false'
+        shell: cmd
+        working-directory: ggp
+        run: >-
+          Tools\GeneralsModBuilder\modbuilder.cmd --build --release --verbose-logging
+          --config-list
+          "Patch104pZH\ModJsonFiles.json"
+          "Patch104pZH\Scripts\Windows\WindowsRunner.json"
+          "Patch104pZH\Scripts\Windows\WindowsTools.json"
+
+      - name: Collect English packs
+        if: steps.exists.outputs.published == 'false'
+        shell: bash
+        run: |
+          echo "Release output:"
+          find ggp/Patch104pZH/.Release -maxdepth 2 -type f | sed 's/^/  /'
+          mkdir out
+          for pack in FullEnglish CoreEnglish; do
+            src="$(find ggp/Patch104pZH/.Release -maxdepth 2 -type f -name "SuperPatch${pack}*.zip" | head -1)"
+            [[ -n "$src" ]] || { echo "::error::SuperPatch${pack} zip not found"; exit 1; }
+            cp "$src" "out/SuperPatch-${pack}.zip"
+          done
+          ls -la out
+
+      - name: Publish release
+        if: steps.exists.outputs.published == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<EOF
+          The Super Patch for Generals: Zero Hour by TheSuperHackers, built unmodified from
+          https://github.com/TheSuperHackers/GeneralsGamePatch/commit/${{ steps.upstream.outputs.sha }}
+          ("${{ steps.upstream.outputs.subject }}") with its Mod Builder. Upstream marks it a test version.
+
+          Used by the Android app's mod manager (Mods → Super Patch). On PC, extract a pack into
+          the Zero Hour folder. Full = core fixes plus optional art; Core = fixes only.
+
+          Players in one multiplayer game must all use the same patch; turn it off for regular
+          C&C Online matches.
+
+          License: GNU GPL v3 with the EA terms in the upstream repository (LICENSE.txt, TERMS.txt).
+          EA has not endorsed and does not support this product.
+          EOF
+          gh release create "${{ steps.upstream.outputs.tag }}" out/*.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Super Patch ${{ steps.upstream.outputs.sha }}" \
+            --notes-file notes.md \
+            --latest=false

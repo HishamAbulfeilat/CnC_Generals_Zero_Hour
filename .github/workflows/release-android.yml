@@ -22,6 +22,8 @@ on:
     tags: ['android-v*']
     # Each successful push to the Android port branch publishes a release.
     branches: ['claude/cloud-vs-device-access-hhykct']
+    # Commits that only change the Super Patch build don't change the app.
+    paths-ignore: ['.github/workflows/build-super-patch.yml']
 
 permissions:
   contents: write
