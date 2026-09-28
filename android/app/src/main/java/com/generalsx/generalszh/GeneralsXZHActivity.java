@@ -49,9 +49,13 @@ public class GeneralsXZHActivity extends SDLActivity {
     @Override
     protected String[] getArguments() {
         String args = getIntent() != null ? getIntent().getStringExtra("args") : null;
-        if (args == null || args.trim().isEmpty()) {
-            return new String[0];
-        }
-        return args.trim().split("\\s+");
+        String[] given = args == null || args.trim().isEmpty()
+                ? new String[0] : args.trim().split("\\s+");
+        // Enabled mods (ModsActivity) load through the engine's -mod folder.
+        String[] mods = new ModManager(this).launchArguments();
+        String[] all = new String[given.length + mods.length];
+        System.arraycopy(given, 0, all, 0, given.length);
+        System.arraycopy(mods, 0, all, given.length, mods.length);
+        return all;
     }
 }

@@ -182,6 +182,7 @@ public class SetupActivity extends Activity {
         intro.setText("Ready to play.");
         buttonList.clear();
         buttonList.add(button("Play", v -> launchGame(readyDataDir)));
+        buttonList.add(button("Mods", v -> startActivity(new Intent(this, ModsActivity.class))));
         buttonList.add(button("Add maps", v -> pickMapsFolder()));
         buttonList.add(button("Update game files", v -> onUpdateGameFiles()));
         buttonList.add(button("Clear caches", v -> onClearCaches()));

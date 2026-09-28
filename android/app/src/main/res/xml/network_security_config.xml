@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HTTPS everywhere, except C&C Online's "servserv" files (MOTD, config, patch lists),
+     which the service only serves over plain HTTP like the original GameSpy/EA servers.
+     Applies to Java networking only (CncOnlineFiles); the game engine's own GameSpy
+     connections are native and unaffected. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">cnc-online.net</domain>
+    </domain-config>
+</network-security-config>

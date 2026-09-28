@@ -111,6 +111,23 @@ final class FolderImporter {
         return maps;
     }
 
+    /**
+     * Copies the whole selected folder (minus Windows-only files) into destDir, e.g. a
+     * custom mod. Returns the folder's display name.
+     */
+    String importTreeInto(File destDir) throws IOException {
+        String rootId = DocumentsContract.getTreeDocumentId(treeUri);
+        listener.onStatus("Reading the selected folder…");
+        List<Entry> files = new ArrayList<>();
+        List<String> paths = new ArrayList<>();
+        collect(rootId, "", files, paths);
+        if (files.isEmpty()) {
+            throw new IOException("The selected folder is empty.");
+        }
+        copyFiles(files, paths, destDir);
+        return displayName(rootId);
+    }
+
     private void copyFiles(List<Entry> files, List<String> paths, File destDir) throws IOException {
         long total = 0;
         for (Entry e : files) {
