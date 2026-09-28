@@ -280,6 +280,7 @@ final class ModManager {
      * number of BIG archives the folder then holds.
      */
     private int prepare(File files) throws IOException {
+        reorderForModFolder(files);
         List<File> loose = new ArrayList<>();
         collectLoose(files, loose);
         if (!loose.isEmpty()) {
@@ -298,6 +299,47 @@ final class ModManager {
             }
         }
         return countBigs(files);
+    }
+
+    /**
+     * Mods are made for the game folder, where BIG archives load in sorted path order and the
+     * FIRST one to provide a file wins (e.g. the Super Patch names its optional art
+     * 600_899_* so it beats its 600_900_* core files). The -mod folder loads in the same
+     * sorted order but with overwrite, so the LAST one wins. Reverse the order: move every
+     * archive to the mod root renamed "NNN_<name>" with descending numbers, so each mod keeps
+     * the priority its authors intended. (Loose files, packed into zz_loose_files.big, stay
+     * last and win, as loose files do in the game folder.)
+     */
+    private static void reorderForModFolder(File files) throws IOException {
+        List<File> bigs = new ArrayList<>();
+        collectBigs(files, bigs);
+        List<String> paths = new ArrayList<>();
+        for (File b : bigs) {
+            paths.add(files.toURI().relativize(b.toURI()).getPath());
+        }
+        Collections.sort(paths);
+        for (int i = 0; i < paths.size(); i++) {
+            File src = new File(files, paths.get(i));
+            File dst = new File(files, String.format(Locale.ROOT, "%03d_%s",
+                    999 - i, src.getName()));
+            if (!src.renameTo(dst)) {
+                throw new IOException("Cannot arrange " + paths.get(i));
+            }
+        }
+    }
+
+    private static void collectBigs(File dir, List<File> out) {
+        File[] children = dir.listFiles();
+        if (children == null) {
+            return;
+        }
+        for (File c : children) {
+            if (c.isDirectory()) {
+                collectBigs(c, out);
+            } else if (c.getName().toLowerCase(Locale.ROOT).endsWith(".big")) {
+                out.add(c);
+            }
+        }
     }
 
     private static void collectLoose(File dir, List<File> out) {
