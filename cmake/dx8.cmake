@@ -313,24 +313,29 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Android" OR ANDROID)
     message(WARNING "DXVK Android: 'git submodule update --init --recursive' on the fork returned ${DXVK_ANDROID_SUBMOD_RESULT}; nested submodules may be missing")
   endif()
 
-  # Apply Patches/dxvk-android.patch idempotently: skip when the working tree
-  # already carries it (reverse-check passes), fail the configure otherwise so an
-  # unpatched DXVK (portability-subset use sites unguarded) can never build silently.
-  execute_process(
-    COMMAND git -C "${DXVK_LOCAL_FORK_DIR}" apply --reverse --check "${CMAKE_SOURCE_DIR}/Patches/dxvk-android.patch"
-    RESULT_VARIABLE DXVK_ANDROID_PATCH_ALREADY_APPLIED
-    ERROR_QUIET)
-  if(NOT DXVK_ANDROID_PATCH_ALREADY_APPLIED EQUAL 0)
+  # Apply the Android patches idempotently: skip one the working tree already carries
+  # (reverse-check passes), fail the configure otherwise so an unpatched DXVK
+  # (portability-subset use sites unguarded) can never build silently.
+  # GeneralsX @bugfix HishamAbulfeilat 28/09/2026 dxvk-android-suboptimal.patch: keep the
+  # swapchain on Android's per-frame VK_SUBOPTIMAL_KHR (pre-rotation mismatch on phones).
+  foreach(DXVK_ANDROID_PATCH dxvk-android.patch dxvk-android-suboptimal.patch)
+    set(DXVK_ANDROID_PATCH_FILE "${CMAKE_SOURCE_DIR}/Patches/${DXVK_ANDROID_PATCH}")
     execute_process(
-      COMMAND git -C "${DXVK_LOCAL_FORK_DIR}" apply "${CMAKE_SOURCE_DIR}/Patches/dxvk-android.patch"
-      RESULT_VARIABLE DXVK_ANDROID_PATCH_RESULT)
-    if(NOT DXVK_ANDROID_PATCH_RESULT EQUAL 0)
-      message(FATAL_ERROR "Failed to apply Patches/dxvk-android.patch to references/fadi-labib-dxvk — the Android DXVK build requires it.")
+      COMMAND git -C "${DXVK_LOCAL_FORK_DIR}" apply --reverse --check "${DXVK_ANDROID_PATCH_FILE}"
+      RESULT_VARIABLE DXVK_ANDROID_PATCH_ALREADY_APPLIED
+      ERROR_QUIET)
+    if(NOT DXVK_ANDROID_PATCH_ALREADY_APPLIED EQUAL 0)
+      execute_process(
+        COMMAND git -C "${DXVK_LOCAL_FORK_DIR}" apply "${DXVK_ANDROID_PATCH_FILE}"
+        RESULT_VARIABLE DXVK_ANDROID_PATCH_RESULT)
+      if(NOT DXVK_ANDROID_PATCH_RESULT EQUAL 0)
+        message(FATAL_ERROR "Failed to apply Patches/${DXVK_ANDROID_PATCH} to references/fadi-labib-dxvk — the Android DXVK build requires it.")
+      endif()
+      message(STATUS "DXVK Android: applied Patches/${DXVK_ANDROID_PATCH}")
+    else()
+      message(STATUS "DXVK Android: Patches/${DXVK_ANDROID_PATCH} already applied")
     endif()
-    message(STATUS "DXVK Android: applied Patches/dxvk-android.patch")
-  else()
-    message(STATUS "DXVK Android: Patches/dxvk-android.patch already applied")
-  endif()
+  endforeach()
 
   # Generate the meson cross file from the template, filling in the NDK bin dir
   # and the host glslang. The wrappers embed -target/--sysroot, so no arch/sysroot

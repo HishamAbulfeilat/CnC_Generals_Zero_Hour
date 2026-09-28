@@ -216,7 +216,9 @@ those need fingers on glass in a skirmish.
 - No edge-of-screen camera scroll (desktop moves the camera when the cursor touches
   a screen edge; with touch the cursor "jumps", so edge scroll triggers spuriously —
   currently mitigated by the game's own scroll handling but worth a dedicated pass).
-- No keyboard-dependent controls (control groups, attack-move modifier); an on-screen
-  affordance would be needed.
+- Keyboard-dependent controls: on Android, `TouchKeyBar.java` adds a collapsible
+  top-right key bar (Esc menu, latching Shift/Ctrl/Alt, Q all units, Space last event,
+  control groups 1-5) that injects keys through `SDLActivity.onNativeKeyDown/Up`. iOS
+  still has no equivalent.
 - iOS uses this same code; any tuning change here changes iPhone/iPad feel too —
   test both before shipping.

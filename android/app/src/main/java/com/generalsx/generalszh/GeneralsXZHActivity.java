@@ -22,6 +22,9 @@ import org.libsdl.app.SDLActivity;
 public class GeneralsXZHActivity extends SDLActivity {
     static final String EXTRA_GAME_DATA_DIR = "gamedata";
 
+    /** On-screen Esc/modifier/group keys (null if SDL failed to set up its layout). */
+    private TouchKeyBar keyBar;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         String dataDir = getIntent() != null ? getIntent().getStringExtra(EXTRA_GAME_DATA_DIR) : null;
@@ -39,6 +42,18 @@ public class GeneralsXZHActivity extends SDLActivity {
             }
         }
         super.onCreate(savedInstanceState);
+        if (mLayout != null) {
+            keyBar = TouchKeyBar.attach(this, mLayout);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        // A modifier left held would stay pressed in the engine after returning.
+        if (keyBar != null) {
+            keyBar.releaseModifiers();
+        }
+        super.onPause();
     }
 
     @Override

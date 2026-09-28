@@ -1055,6 +1055,27 @@ int main(int argc, char* argv[])
 		ApplicationHWnd = (HWND)TheSDL3Window;
 		fprintf(stderr, "INFO: SDL3 window created successfully\n");
 
+#if defined(__ANDROID__)
+		// GeneralsX @bugfix HishamAbulfeilat 28/09/2026 The game activity is landscape-locked, but
+		// when it starts from a portrait launcher its surface is first laid out in portrait and
+		// only rotates a moment later. Creating the D3D device then gave it a portrait backbuffer
+		// (1440x2939 on an S25 Ultra) that the landscape game image was squeezed into until a
+		// device reset seconds later. Wait for the rotation (bounded) before going further.
+		{
+			const Uint64 deadline = SDL_GetTicks() + 3000;
+			int w = 0, h = 0;
+			for (;;) {
+				SDL_PumpEvents();
+				SDL_GetWindowSizeInPixels(TheSDL3Window, &w, &h);
+				if (w > h || SDL_GetTicks() >= deadline) {
+					break;
+				}
+				SDL_Delay(16);
+			}
+			fprintf(stderr, "INFO: window %dx%d at device creation\n", w, h);
+		}
+#endif
+
 #if (defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(__ANDROID__)
 		// Match the game's internal resolution to the phone screen's aspect ratio.
 		// Without this the engine runs its 4:3 default inside the 19.5:9 display:

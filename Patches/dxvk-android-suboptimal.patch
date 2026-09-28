@@ -1,0 +1,61 @@
+diff --git a/src/dxvk/dxvk_presenter.cpp b/src/dxvk/dxvk_presenter.cpp
+index 38b8a2d6..94664364 100644
+--- a/src/dxvk/dxvk_presenter.cpp
++++ b/src/dxvk/dxvk_presenter.cpp
+@@ -64,6 +64,22 @@ namespace dxvk {
+   }
+ 
+ 
++  // GeneralsX @bugfix HishamAbulfeilat 28/09/2026 Android returns VK_SUBOPTIMAL_KHR from
++  // every acquire and present while the swapchain's preTransform (always IDENTITY here)
++  // differs from the display's rotation hint, i.e. on any phone (natural orientation
++  // portrait) running the game in landscape. The compositor rotates the image, so the
++  // swapchain stays valid; treating SUBOPTIMAL as "recreate" rebuilt the swapchain every
++  // frame, churning GPU memory until DxvkMemoryAllocator crashed (Adreno 830, S25 Ultra).
++  // A real size change still arrives as VK_ERROR_OUT_OF_DATE_KHR and recreates it.
++  static bool isUsableSwapchainStatus(VkResult vr) {
++#ifdef __ANDROID__
++    return vr == VK_SUCCESS || vr == VK_SUBOPTIMAL_KHR;
++#else
++    return vr == VK_SUCCESS;
++#endif
++  }
++
++
+   VkResult Presenter::checkSwapChainStatus() {
+     std::lock_guard lock(m_surfaceMutex);
+ 
+@@ -106,13 +122,13 @@ namespace dxvk {
+ 
+     // This is a normal occurence, but may be useful for
+     // debugging purposes in case WSI goes wrong somehow.
+-    if (m_acquireStatus != VK_SUCCESS && m_swapchain)
++    if (!isUsableSwapchainStatus(m_acquireStatus) && m_swapchain)
+       Logger::info(str::format("Presenter: Got ", m_acquireStatus, ", recreating swapchain"));
+ 
+     // If the swap chain is out of date, recreate it and retry. It
+     // is possible that we do not get a new swap chain here, e.g.
+     // because the window is minimized.
+-    if (m_acquireStatus != VK_SUCCESS || !m_swapchain) {
++    if (!isUsableSwapchainStatus(m_acquireStatus) || !m_swapchain) {
+       VkResult vr = recreateSwapChain();
+ 
+       if (vr == VK_NOT_READY && hasSwapchain)
+@@ -232,7 +248,7 @@ namespace dxvk {
+ 
+     // On a successful present, try to acquire next image already, in
+     // order to hide potential delays from the application thread.
+-    if (status == VK_SUCCESS) {
++    if (isUsableSwapchainStatus(status)) {
+       PresenterSync& nextSync = m_semaphores.at(m_frameIndex);
+       waitForSwapchainFence(nextSync);
+ 
+@@ -245,7 +261,7 @@ namespace dxvk {
+     // There is no guarantee that suboptimal state is returned by both functions.
+     std::lock_guard lock(m_surfaceMutex);
+ 
+-    if (status != VK_SUCCESS) {
++    if (!isUsableSwapchainStatus(status)) {
+       Logger::info(str::format("Presenter: Got ", status, ", recreating swapchain"));
+ 
+       m_dirtySwapchain = true;
