@@ -473,6 +473,14 @@ edit DXVK code, regenerate: `cd references/fadi-labib-dxvk && git diff >
   `[INI]`/`[SUBSYS]`/`[GX-ISSUE144]` boot spam by default (~85% quieter); launch with the
   `GENERALSX_VERBOSE` env set for the full firehose. `err:`/`warn:`/`ERROR`/`FATAL` are
   never filtered.
+- **Logs without adb**: the same lines go to `files/logs/game.log` (previous run:
+  `game-prev.log`), prefixed with seconds since start. A native crash appends
+  `FATAL: crash: signal ...` and a backtrace of `lib+offset` frames. The launcher's
+  **Save logs** button (also offered after a crash) saves one text report with device
+  info, Android's exit reasons (native crash vs low-memory kill vs ANR),
+  `ReleaseCrashInfo.txt`, `Options.ini`, both logs and the app's logcat. Each release
+  ships `GeneralsZH-symbols-<tag>.tar.xz` (the unstripped libraries) to resolve the
+  frames: `llvm-addr2line -Cfie arm64-v8a/libmain.so 0x<offset>`.
 - **Boot health check** (after ~40 s):
   `adb logcat -d | grep -cE "Actual swapchain properties"` → must be ≥1;
   `grep -c NATIVE_WINDOW_IN_USE` → must be 0; `grep -c "beginning of crash"` → 0.

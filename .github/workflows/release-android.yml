@@ -142,6 +142,14 @@ jobs:
           name: GeneralsZH-Android-apk
           path: GeneralsZH-*.apk
 
+      # The APK's native libraries are stripped; these unstripped copies turn the
+      # "lib+offset" frames of an on-device crash report (game.log / "Save logs")
+      # into function names and source lines (llvm-addr2line / llvm-symbolizer).
+      - name: Native symbols
+        run: |
+          tar -C android/app/jniLibs -I 'xz -T0 -6' -cf "GeneralsZH-symbols-${RELEASE_TAG}.tar.xz" arm64-v8a
+          ls -lh "GeneralsZH-symbols-${RELEASE_TAG}.tar.xz"
+
       # Runs only when every step above succeeded (the default for steps).
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/android-v') || github.event_name == 'push'
@@ -159,7 +167,7 @@ jobs:
             echo "- ${SIGNING_NOTE}"
           } > "$notes"
           # A release created with GITHUB_TOKEN does not trigger another workflow run.
-          gh release create "$RELEASE_TAG" GeneralsZH-*.apk \
+          gh release create "$RELEASE_TAG" GeneralsZH-*.apk GeneralsZH-symbols-*.tar.xz \
             --target "$GITHUB_SHA" \
             --title "Android ${RELEASE_TAG#android-}" \
             --notes-file "$notes" \

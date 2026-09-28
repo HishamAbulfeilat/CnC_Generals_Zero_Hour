@@ -24,8 +24,14 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
 import in.dragonbra.javasteam.steam.authentication.IAuthenticator;
@@ -42,6 +48,7 @@ public class SetupActivity extends Activity {
     private static final String TAG = "GeneralsX";
     private static final int REQUEST_PICK_FOLDER = 1;
     private static final int REQUEST_PICK_MAPS = 2;
+    private static final int REQUEST_SAVE_LOGS = 3;
     private static final String STEAM_STORE_URL =
             "https://store.steampowered.com/app/" + GameDataPaths.STEAM_APP_ID + "/";
     /** C&C Online (the GameSpy replacement the online menus connect to) account sign-up. */
@@ -72,6 +79,9 @@ public class SetupActivity extends Activity {
             showSetup();
         }
         DownloadService.setUiAuthenticator(authenticator);
+        if (savedInstanceState == null) {
+            offerLogsAfterCrash();
+        }
     }
 
     @Override
@@ -188,6 +198,7 @@ public class SetupActivity extends Activity {
         buttonList.add(button("Clear caches", v -> onClearCaches()));
         buttonList.add(button("Check for app updates", v -> onCheckForAppUpdate()));
         buttonList.add(button("C&C Online account", v -> openUrl(CNC_ONLINE_REGISTER_URL)));
+        buttonList.add(button("Save logs", v -> saveLogs()));
         buttonList.add(button("Re-import game files", v -> showSetup()));
         layoutButtons();
         status.setText("Online play uses C&C Online: create a free account, then sign in with it"
@@ -207,6 +218,7 @@ public class SetupActivity extends Activity {
         buttonList.add(button("Import from folder", v -> pickFolder()));
         buttonList.add(button("Buy on Steam", v -> openUrl(STEAM_STORE_URL)));
         buttonList.add(button("Check for app updates", v -> onCheckForAppUpdate()));
+        buttonList.add(button("Save logs", v -> saveLogs()));
         if (account != null) {
             buttonList.add(button("Sign out of Steam", v -> {
                 SteamLoginStore.clear(this);
@@ -419,6 +431,55 @@ public class SetupActivity extends Activity {
                 .show();
     }
 
+    // ---------------------------------------------------------------------------------
+    // Logs
+
+    /** After the game crashed or was killed, says why and offers to save the logs. */
+    private void offerLogsAfterCrash() {
+        String crash = CrashLogs.takeUnseenCrash(this);
+        if (crash == null) {
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("The game closed unexpectedly")
+                .setMessage(crash + "\n\nSave the logs to a file you can send for a fix?")
+                .setPositiveButton("Save logs", (d, w) -> saveLogs())
+                .setNegativeButton("Not now", null)
+                .show();
+    }
+
+    /** Asks where to save the log report (CrashLogs); written in onActivityResult. */
+    private void saveLogs() {
+        String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT)
+                .format(new Date());
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_TITLE, "GeneralsZH-logs-" + stamp + ".txt");
+        startActivityForResult(intent, REQUEST_SAVE_LOGS);
+    }
+
+    private void writeLogs(Uri target) {
+        status.setText("Collecting logs...");
+        new Thread(() -> {
+            String message;
+            try (OutputStream out = getContentResolver().openOutputStream(target)) {
+                if (out == null) {
+                    throw new IOException("cannot open the chosen file");
+                }
+                byte[] report = CrashLogs.buildReport(this)
+                        .getBytes(StandardCharsets.UTF_8);
+                out.write(report);
+                message = "Saved " + (report.length >> 10) + " KB of logs. Send that file along"
+                        + " with what you were doing when the game crashed.";
+            } catch (Exception e) {
+                message = "Saving logs failed: " + e.getMessage();
+            }
+            String shown = message;
+            runOnUiThread(() -> status.setText(shown));
+        }, "SaveLogs").start();
+    }
+
     private void onClearCaches() {
         File dataDir = readyDataDir;
         new Thread(() -> {
@@ -592,7 +653,9 @@ public class SetupActivity extends Activity {
             return;
         }
         Uri tree = data.getData();
-        if (requestCode == REQUEST_PICK_FOLDER) {
+        if (requestCode == REQUEST_SAVE_LOGS) {
+            writeLogs(tree);
+        } else if (requestCode == REQUEST_PICK_FOLDER) {
             importGame(tree);
         } else if (requestCode == REQUEST_PICK_MAPS) {
             importMaps(tree);

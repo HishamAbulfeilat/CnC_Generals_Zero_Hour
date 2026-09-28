@@ -57,6 +57,14 @@
 #include <dlfcn.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+// GeneralsX @feature HishamAbulfeilat 28/09/2026 On-device log file + crash backtrace (see gxOpenLogFile).
+#include <atomic>
+#include <csignal>
+#include <ctime>
+#include <sys/syscall.h>
+#include <sys/uio.h>
+#include <ucontext.h>
+#include <unwind.h>
 #endif
 #endif
 #include <cstdlib>
@@ -148,6 +156,66 @@ static bool gxIsBootTraceSpam(const char *line)
 	    || strncmp(line, "[GX-ISSUE144]", 13) == 0;
 }
 
+// GeneralsX @feature HishamAbulfeilat 28/09/2026 On-device log file.
+// Players have no adb, so logcat alone leaves crashes undiagnosable. The pump also
+// writes every line it forwards to <files>/logs/game.log (the previous run's log is
+// kept as game-prev.log), which the launcher's "Save logs" button collects. Lines are
+// prefixed with seconds since start; past the cap only error lines are written.
+static int g_gxLogFd = -1;
+static size_t g_gxLogWritten = 0;
+static const size_t kGxLogCap = 16u * 1024u * 1024u;
+static struct timespec g_gxLogStart;
+
+static void gxOpenLogFile()
+{
+	const char *internal = SDL_GetAndroidInternalStoragePath();
+	if (internal == nullptr) {
+		return;
+	}
+	char dir[512];
+	char cur[600];
+	char prev[600];
+	snprintf(dir, sizeof(dir), "%s/logs", internal);
+	mkdir(dir, 0700);
+	snprintf(cur, sizeof(cur), "%s/game.log", dir);
+	snprintf(prev, sizeof(prev), "%s/game-prev.log", dir);
+	rename(cur, prev);
+	clock_gettime(CLOCK_MONOTONIC, &g_gxLogStart);
+	g_gxLogFd = open(cur, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+}
+
+static bool gxIsErrorLine(const char *line)
+{
+	while (*line == ' ' || *line == '\t') ++line;
+	return strncmp(line, "err:", 4) == 0 || strncmp(line, "ERROR", 5) == 0
+	    || strncmp(line, "FATAL", 5) == 0 || strncmp(line, "warn:", 5) == 0;
+}
+
+static void gxLogFileWrite(const char *line)
+{
+	if (g_gxLogFd < 0) {
+		return;
+	}
+	if (g_gxLogWritten >= kGxLogCap && !gxIsErrorLine(line)) {
+		return;
+	}
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	long ms = (long)(now.tv_sec - g_gxLogStart.tv_sec) * 1000L
+	        + (now.tv_nsec - g_gxLogStart.tv_nsec) / 1000000L;
+	char stamp[32];
+	int stampLen = snprintf(stamp, sizeof(stamp), "[%6ld.%03ld] ", ms / 1000, ms % 1000);
+	struct iovec parts[3] = {
+		{ stamp, (size_t)stampLen },
+		{ (void *)line, strlen(line) },
+		{ (void *)"\n", 1 },
+	};
+	ssize_t w = writev(g_gxLogFd, parts, 3);
+	if (w > 0) {
+		g_gxLogWritten += (size_t)w;
+	}
+}
+
 static void *gxLogcatPump(void *arg)
 {
 	const int readFd = (int)(intptr_t)arg;
@@ -165,6 +233,7 @@ static void *gxLogcatPump(void *arg)
 				line[len] = '\0';
 				if (verbose || !gxIsBootTraceSpam(line)) {
 					__android_log_write(ANDROID_LOG_INFO, "GeneralsX", line);
+					gxLogFileWrite(line);
 				}
 				len = 0;
 				if (c != '\n') {
@@ -179,6 +248,7 @@ static void *gxLogcatPump(void *arg)
 		line[len] = '\0';
 		if (verbose || !gxIsBootTraceSpam(line)) {
 			__android_log_write(ANDROID_LOG_INFO, "GeneralsX", line);
+			gxLogFileWrite(line);
 		}
 	}
 	return nullptr;
@@ -223,6 +293,128 @@ static void gxRedirectStdioToLogcat()
 		if (savedStderr != -1) { dup2(savedStderr, STDERR_FILENO); close(savedStderr); }
 		close(pipeFd[0]);
 		close(pipeFd[1]);
+	}
+}
+
+// GeneralsX @feature HishamAbulfeilat 28/09/2026 Native crash report.
+// A crash (SIGSEGV/SIGABRT/...) writes the signal, fault address and a backtrace of
+// library+offset frames to game.log and logcat, then hands the signal back to the
+// previous handler so Android's own crash reporting still runs. Offsets are resolved
+// against the unstripped libraries CI publishes with each release
+// (GeneralsZH-symbols-<tag>.tar.xz). The short sleep lets the pump thread drain
+// the engine's last stdio lines into the log first.
+static const int kGxCrashSignals[] = { SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT, SIGTRAP };
+static struct sigaction g_gxOldCrashActions[sizeof(kGxCrashSignals) / sizeof(kGxCrashSignals[0])];
+static std::atomic<bool> g_gxCrashing(false);
+
+struct GxBacktrace {
+	uintptr_t pcs[64];
+	int count;
+};
+
+static _Unwind_Reason_Code gxUnwindFrame(struct _Unwind_Context *ctx, void *arg)
+{
+	GxBacktrace *bt = static_cast<GxBacktrace *>(arg);
+	uintptr_t pc = _Unwind_GetIP(ctx);
+	if (pc != 0) {
+		bt->pcs[bt->count++] = pc;
+	}
+	return bt->count < 64 ? _URC_NO_REASON : _URC_END_OF_STACK;
+}
+
+static void gxCrashWrite(const char *text)
+{
+	__android_log_write(ANDROID_LOG_FATAL, "GeneralsX", text);
+	if (g_gxLogFd >= 0) {
+		struct iovec parts[2] = { { (void *)text, strlen(text) }, { (void *)"\n", 1 } };
+		if (writev(g_gxLogFd, parts, 2) < 0) {
+			return;
+		}
+	}
+}
+
+static void gxCrashFrame(const char *label, uintptr_t pc)
+{
+	char text[512];
+	Dl_info info;
+	if (pc != 0 && dladdr((void *)pc, &info) != 0 && info.dli_fname != nullptr) {
+		const char *lib = strrchr(info.dli_fname, '/');
+		lib = lib != nullptr ? lib + 1 : info.dli_fname;
+		if (info.dli_sname != nullptr) {
+			snprintf(text, sizeof(text), "  %s %p %s+0x%zx (%s+0x%zx)", label, (void *)pc, lib,
+			         (size_t)(pc - (uintptr_t)info.dli_fbase), info.dli_sname,
+			         (size_t)(pc - (uintptr_t)info.dli_saddr));
+		} else {
+			snprintf(text, sizeof(text), "  %s %p %s+0x%zx", label, (void *)pc, lib,
+			         (size_t)(pc - (uintptr_t)info.dli_fbase));
+		}
+	} else {
+		snprintf(text, sizeof(text), "  %s %p <unknown>", label, (void *)pc);
+	}
+	gxCrashWrite(text);
+}
+
+static void gxCrashHandler(int sig, siginfo_t *info, void *context)
+{
+	size_t slot = 0;
+	while (kGxCrashSignals[slot] != sig) {
+		++slot;
+	}
+	if (!g_gxCrashing.exchange(true)) {
+		struct timespec drain = { 0, 300 * 1000000L };
+		nanosleep(&drain, nullptr);
+
+		char text[256];
+		snprintf(text, sizeof(text), "FATAL: crash: signal %d (%s) code %d, fault address %p, thread %d",
+		         sig, strsignal(sig), info->si_code, info->si_addr, (int)gettid());
+		gxCrashWrite(text);
+
+		const ucontext_t *uc = static_cast<const ucontext_t *>(context);
+#if defined(__aarch64__)
+		gxCrashFrame("pc", (uintptr_t)uc->uc_mcontext.pc);
+		gxCrashFrame("lr", (uintptr_t)uc->uc_mcontext.regs[30]);
+#elif defined(__x86_64__)
+		gxCrashFrame("pc", (uintptr_t)uc->uc_mcontext.gregs[REG_RIP]);
+#endif
+		gxCrashWrite("FATAL: backtrace:");
+		GxBacktrace bt;
+		bt.count = 0;
+		_Unwind_Backtrace(gxUnwindFrame, &bt);
+		for (int i = 0; i < bt.count; ++i) {
+			char label[8];
+			snprintf(label, sizeof(label), "#%02d", i);
+			gxCrashFrame(label, bt.pcs[i]);
+		}
+		if (g_gxLogFd >= 0) {
+			fsync(g_gxLogFd);
+		}
+	}
+
+	// Hand the signal to the previous handler (debuggerd). A fault re-executes the
+	// faulting instruction on return; a sent signal (abort) is queued again.
+	sigaction(sig, &g_gxOldCrashActions[slot], nullptr);
+	if (info->si_code <= 0 || sig == SIGABRT) {
+		syscall(SYS_rt_tgsigqueueinfo, getpid(), gettid(), sig, info);
+	}
+}
+
+static void gxInstallCrashHandler()
+{
+	// Own stack for this thread's handler so a stack overflow can still be reported.
+	static char altStack[64 * 1024];
+	stack_t ss;
+	ss.ss_sp = altStack;
+	ss.ss_size = sizeof(altStack);
+	ss.ss_flags = 0;
+	sigaltstack(&ss, nullptr);
+
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_sigaction = gxCrashHandler;
+	sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+	sigemptyset(&sa.sa_mask);
+	for (size_t i = 0; i < sizeof(kGxCrashSignals) / sizeof(kGxCrashSignals[0]); ++i) {
+		sigaction(kGxCrashSignals[i], &sa, &g_gxOldCrashActions[i]);
 	}
 }
 
@@ -542,7 +734,9 @@ int main(int argc, char* argv[])
 	// GeneralsX @feature FadiLabib 06/07/2026 Route stdout/stderr to logcat FIRST,
 	// before any diagnostic below, so the whole on-device run is visible via
 	// `adb logcat -s GeneralsX` (Android otherwise discards app stdio).
+	gxOpenLogFile();
 	gxRedirectStdioToLogcat();
+	gxInstallCrashHandler();
 
 	// GeneralsX @feature FadiLabib 06/07/2026 Android bootstrap.
 	// The engine resolves ALL game data relative to the working directory
