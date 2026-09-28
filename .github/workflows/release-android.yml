@@ -4,7 +4,8 @@ name: Release Android APK
 # locally (docs/BUILD/ANDROID.md), then:
 #   - on any run: uploads the APK as a workflow artifact
 #   - on an android-v* tag: publishes it as a GitHub Release under that tag
-#   - on a successful push to the Android port branch: publishes a new GitHub
+#   - on a successful push to the Android port branch, or a manual "Run workflow"
+#     (e.g. right after adding the signing secrets): publishes a new GitHub
 #     Release "android-r<run number>" (marked latest)
 # The APK contains NO game assets — players supply their own Zero Hour data.
 #
@@ -152,7 +153,7 @@ jobs:
 
       # Runs only when every step above succeeded (the default for steps).
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/android-v') || github.event_name == 'push'
+        if: startsWith(github.ref, 'refs/tags/android-v') || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
