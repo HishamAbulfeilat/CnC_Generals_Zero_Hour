@@ -163,7 +163,9 @@ static bool gxIsBootTraceSpam(const char *line)
 // prefixed with seconds since start; past the cap only error lines are written.
 static int g_gxLogFd = -1;
 static size_t g_gxLogWritten = 0;
-static const size_t kGxLogCap = 16u * 1024u * 1024u;
+// GeneralsX @feature HishamAbulfeilat 28/09/2026 Debug mode (launcher, GENERALSX_DEBUG) records
+// whole sessions, so it gets a far larger cap than the everyday crash log.
+static size_t g_gxLogCap = 16u * 1024u * 1024u;
 static struct timespec g_gxLogStart;
 
 static void gxOpenLogFile()
@@ -181,6 +183,9 @@ static void gxOpenLogFile()
 	snprintf(prev, sizeof(prev), "%s/game-prev.log", dir);
 	rename(cur, prev);
 	clock_gettime(CLOCK_MONOTONIC, &g_gxLogStart);
+	if (getenv("GENERALSX_DEBUG") != nullptr) {
+		g_gxLogCap = 256u * 1024u * 1024u;
+	}
 	g_gxLogFd = open(cur, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
 }
 
@@ -196,7 +201,7 @@ static void gxLogFileWrite(const char *line)
 	if (g_gxLogFd < 0) {
 		return;
 	}
-	if (g_gxLogWritten >= kGxLogCap && !gxIsErrorLine(line)) {
+	if (g_gxLogWritten >= g_gxLogCap && !gxIsErrorLine(line)) {
 		return;
 	}
 	struct timespec now;

@@ -30,6 +30,14 @@ import org.libsdl.app.SDLActivity;
  *
  * The bar sits in the top-right corner, collapsed to a single "Keys" button by default;
  * whether it is open is remembered.
+ *
+ * GeneralsX @feature HishamAbulfeilat 28/09/2026 A second row of quick commands runs through
+ * the engine (nativeQuickCommand, SDL3GameEngine.cpp) rather than hotkeys, whose letters
+ * depend on the game's language: Army (select every combat unit), Army attack (select the
+ * army, then attack-move: tap the target), Attack-move and Guard for the current selection
+ * (tap where), Stop and Deselect (also clears a selected building). With the mobile touch
+ * scheme this row stays visible, and "Box" switches one-finger drags from camera to
+ * selection box.
  */
 final class TouchKeyBar {
     private static final String PREFS = "touch_key_bar";
@@ -38,9 +46,21 @@ final class TouchKeyBar {
     private static final int IDLE_COLOR = 0x99202020;
     private static final int HELD_COLOR = 0xCCB06000;
 
+    // Must match enum QuickCommand in SDL3GameEngine.cpp.
+    private static final int QUICK_SELECT_ARMY = 1;
+    private static final int QUICK_ATTACK_MOVE = 2;
+    private static final int QUICK_GUARD = 3;
+    private static final int QUICK_STOP = 4;
+    private static final int QUICK_DESELECT = 5;
+    private static final int QUICK_ARMY_ATTACK = 6;
+
+    private static native void nativeQuickCommand(int command);
+    private static native void nativeSetBoxSelect(boolean on);
+
     private final Activity activity;
-    private final LinearLayout keys;
     private final List<Modifier> modifiers = new ArrayList<>();
+    /** Row that addTap/addModifier/addCommand append to. */
+    private LinearLayout row;
 
     private final class Modifier {
         final int keyCode;
@@ -66,9 +86,8 @@ final class TouchKeyBar {
         }
     }
 
-    private TouchKeyBar(Activity activity, LinearLayout keys) {
+    private TouchKeyBar(Activity activity) {
         this.activity = activity;
-        this.keys = keys;
     }
 
     /** Whether the player turned the bar off (Settings, "On-screen keys"). */
@@ -81,48 +100,97 @@ final class TouchKeyBar {
                 .putBoolean(KEY_HIDDEN, hidden).apply();
     }
 
-    /** Adds the bar on top of the game surface in {@code layout} (SDLActivity's RelativeLayout). */
-    static TouchKeyBar attach(Activity activity, ViewGroup layout) {
-        LinearLayout bar = new LinearLayout(activity);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
+    /**
+     * Adds the bar on top of the game surface in {@code layout} (SDLActivity's RelativeLayout).
+     * {@code mobileScheme}: the command row stays visible and gets the Box toggle.
+     */
+    static TouchKeyBar attach(Activity activity, ViewGroup layout, boolean mobileScheme) {
+        TouchKeyBar kb = new TouchKeyBar(activity);
 
-        LinearLayout keys = new LinearLayout(activity);
-        keys.setOrientation(LinearLayout.HORIZONTAL);
-        TouchKeyBar kb = new TouchKeyBar(activity, keys);
+        LinearLayout column = new LinearLayout(activity);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setGravity(Gravity.END);
 
+        LinearLayout commands = kb.newRow();
+        kb.addCommand("Army", QUICK_SELECT_ARMY);
+        kb.addCommand("Army attack", QUICK_ARMY_ATTACK);
+        kb.addCommand("Attack-move", QUICK_ATTACK_MOVE);
+        kb.addCommand("Guard", QUICK_GUARD);
+        kb.addCommand("Stop", QUICK_STOP);
+        kb.addCommand("Deselect", QUICK_DESELECT);
+        if (mobileScheme) {
+            kb.addBoxToggle();
+        }
+
+        LinearLayout keys = kb.newRow();
         kb.addTap("Menu", KeyEvent.KEYCODE_ESCAPE);
         kb.addModifier("Shift", KeyEvent.KEYCODE_SHIFT_LEFT);
         kb.addModifier("Ctrl", KeyEvent.KEYCODE_CTRL_LEFT);
         kb.addModifier("Alt", KeyEvent.KEYCODE_ALT_LEFT);
-        kb.addTap("All units", KeyEvent.KEYCODE_Q);
         kb.addTap("Event", KeyEvent.KEYCODE_SPACE);
         for (int i = 1; i <= 5; i++) {
             kb.addTap(String.valueOf(i), KeyEvent.KEYCODE_0 + i);
         }
+        TextView toggle = kb.button("Keys");
+        keys.addView(toggle, 0);
 
         SharedPreferences prefs = activity.getSharedPreferences(PREFS, Activity.MODE_PRIVATE);
-        keys.setVisibility(prefs.getBoolean(KEY_EXPANDED, false) ? View.VISIBLE : View.GONE);
-        TextView toggle = kb.button("Keys");
+        boolean expanded = prefs.getBoolean(KEY_EXPANDED, false);
+        // Collapsed: only the "Keys" button (plus the command row in the mobile scheme).
+        kb.showExpanded(keys, commands, toggle, expanded, mobileScheme);
         toggle.setOnClickListener(v -> {
-            boolean expand = keys.getVisibility() != View.VISIBLE;
+            boolean expand = !prefs.getBoolean(KEY_EXPANDED, false);
             if (!expand) {
                 kb.releaseModifiers();
             }
-            keys.setVisibility(expand ? View.VISIBLE : View.GONE);
+            kb.showExpanded(keys, commands, toggle, expand, mobileScheme);
             prefs.edit().putBoolean(KEY_EXPANDED, expand).apply();
         });
 
-        bar.addView(keys);
-        bar.addView(toggle);
+        column.addView(commands);
+        column.addView(keys);
 
         RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.addRule(RelativeLayout.ALIGN_PARENT_TOP);
         lp.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
         lp.setMargins(0, kb.dp(6), kb.dp(6), 0);
-        layout.addView(bar, lp);
+        layout.addView(column, lp);
         return kb;
+    }
+
+    private void showExpanded(LinearLayout keys, LinearLayout commands, TextView toggle,
+                              boolean expanded, boolean mobileScheme) {
+        for (int i = 0; i < keys.getChildCount(); i++) {
+            View child = keys.getChildAt(i);
+            child.setVisibility(expanded || child == toggle ? View.VISIBLE : View.GONE);
+        }
+        commands.setVisibility(expanded || mobileScheme ? View.VISIBLE : View.GONE);
+    }
+
+    private LinearLayout newRow() {
+        row = new LinearLayout(activity);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.END);
+        row.setPadding(0, 0, 0, dp(4));
+        return row;
+    }
+
+    private void addCommand(String label, int command) {
+        TextView b = button(label);
+        b.setOnClickListener(v -> nativeQuickCommand(command));
+        row.addView(b);
+    }
+
+    private void addBoxToggle() {
+        TextView b = button("Box");
+        boolean[] on = { false };
+        b.setOnClickListener(v -> {
+            on[0] = !on[0];
+            nativeSetBoxSelect(on[0]);
+            b.setBackground(background(on[0] ? HELD_COLOR : IDLE_COLOR));
+        });
+        row.addView(b);
     }
 
     /** Releases held modifiers, e.g. when the game goes to the background. */
@@ -138,7 +206,7 @@ final class TouchKeyBar {
             SDLActivity.onNativeKeyDown(keyCode);
             SDLActivity.onNativeKeyUp(keyCode);
         });
-        keys.addView(b);
+        row.addView(b);
     }
 
     private void addModifier(String label, int keyCode) {
@@ -146,7 +214,7 @@ final class TouchKeyBar {
         Modifier m = new Modifier(keyCode, b);
         b.setOnClickListener(v -> m.set(!m.held));
         modifiers.add(m);
-        keys.addView(b);
+        row.addView(b);
     }
 
     private TextView button(String label) {

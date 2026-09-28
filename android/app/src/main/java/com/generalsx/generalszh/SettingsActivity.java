@@ -146,6 +146,29 @@ public class SettingsActivity extends Activity {
                 new Choice("Off", "no"),
         });
         addKeyBarRow();
+        addSwitchRow("Touch controls",
+                "Classic: one finger draws a selection box, two fingers move the camera."
+                        + " Mobile: one finger moves the camera; the key bar's \"Box\" switches it"
+                        + " to selection. Both: pinch zooms, two-finger tap deselects.",
+                LaunchOptions.mobileTouch(this) ? "Mobile" : "Classic",
+                () -> LaunchOptions.setMobileTouch(this, !LaunchOptions.mobileTouch(this)));
+        addSwitchRow("FPS overlay", "Frame rate and frame times drawn in the corner.",
+                LaunchOptions.fpsOverlay(this) ? "Shown" : "Hidden",
+                () -> LaunchOptions.setFpsOverlay(this, !LaunchOptions.fpsOverlay(this)));
+    }
+
+    /** A two-state launcher option (LaunchOptions): tapping flips it. */
+    private void addSwitchRow(String title, String help, String shown, Runnable flip) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(0, dp(6), 0, dp(6));
+        row.addView(text(title, 16, Color.WHITE, true));
+        row.addView(text(help, 13, Color.LTGRAY, false));
+        row.addView(button(shown, v -> {
+            flip.run();
+            refresh();
+        }));
+        rows.addView(row);
     }
 
     /** The panel's own shape at a few heights, plus 16:9 and 4:3 (see W3DDisplay.cpp). */
@@ -252,6 +275,8 @@ public class SettingsActivity extends Activity {
             options.set(key, null);
         }
         TouchKeyBar.setHidden(this, false);
+        LaunchOptions.setMobileTouch(this, false);
+        LaunchOptions.setFpsOverlay(this, false);
         save();
     }
 

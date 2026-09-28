@@ -205,6 +205,7 @@ public class SetupActivity extends Activity {
         buttonList.add(button("Check for app updates", v -> onCheckForAppUpdate()));
         buttonList.add(button("C&C Online account", v -> openUrl(CNC_ONLINE_REGISTER_URL)));
         buttonList.add(button("Save logs", v -> saveLogs()));
+        buttonList.add(button(debugLabel(), this::toggleDebug));
         buttonList.add(button("Re-import game files", v -> showSetup()));
         layoutButtons();
         status.setText("Online play uses C&C Online: create a free account, then sign in with it"
@@ -452,6 +453,24 @@ public class SetupActivity extends Activity {
                 .setPositiveButton("Save logs", (d, w) -> saveLogs())
                 .setNegativeButton("Not now", null)
                 .show();
+    }
+
+    private String debugLabel() {
+        return "Debug mode: " + (LaunchOptions.debug(this) ? "ON" : "off");
+    }
+
+    /**
+     * Debug mode records the whole next game sessions (engine output unfiltered, frame-time
+     * and memory samples, the app's logcat, thermal/battery state) for "Save logs".
+     */
+    private void toggleDebug(View v) {
+        boolean on = !LaunchOptions.debug(this);
+        LaunchOptions.setDebug(this, on);
+        ((Button) v).setText(debugLabel());
+        status.setText(on
+                ? "Debug mode on: the next game sessions are recorded in full (it uses more storage"
+                        + " and a little performance). Play, then tap \"Save logs\" and send the file."
+                : "Debug mode off.");
     }
 
     /** Asks where to save the log report (CrashLogs); written in onActivityResult. */

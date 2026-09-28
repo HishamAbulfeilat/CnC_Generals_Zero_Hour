@@ -78,6 +78,16 @@ extern GameWindowManager *TheWindowManager;
 
 #if GX_TOUCH_UI
 #include <atomic>
+#include <mutex>
+#include <vector>
+#include <unistd.h>
+#include "Common/MessageStream.h"
+#include "GameClient/ControlBar.h"
+#include "GameClient/InGameUI.h"
+#include "GameLogic/GameLogic.h"
+#if defined(__ANDROID__)
+#include <jni.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // iOS app lifecycle
@@ -177,11 +187,45 @@ struct TouchState {
 	float panLastX = 0.0f, panLastY = 0.0f;   // previous pan centroid (per-event delta)
 	float panAccumX = 0.0f, panAccumY = 0.0f; // finger delta accrued since last frame flush
 	float f1x = 0.0f, f1y = 0.0f, f2x = 0.0f, f2y = 0.0f; // normalized per finger
+	bool singlePan = false;             // PAN driven by finger1 alone (mobile scheme)
+	Uint64 twoDownTicks = 0;            // when the second finger landed (two-finger tap)
 };
 
 TouchState s_touch;
 
 const Uint64 LONG_PRESS_MS = 600;
+
+// GeneralsX @feature HishamAbulfeilat 28/09/2026 Launcher switches (GeneralsXZHActivity exports
+// them as environment variables before the engine starts):
+//  GX_TOUCH_SCHEME=mobile  one finger drags the camera; box selection needs the key bar's
+//                          "Box" toggle (s_boxSelect). Default ("classic"): one finger boxes.
+//  GENERALSX_DEBUG         log gesture decisions and frame timing (see logFrameStats).
+bool touchMobileScheme()
+{
+	static const bool mobile = [] {
+		const char *scheme = getenv("GX_TOUCH_SCHEME");
+		return scheme != nullptr && strcmp(scheme, "mobile") == 0;
+	}();
+	return mobile;
+}
+
+bool debugEnabled()
+{
+	static const bool on = getenv("GENERALSX_DEBUG") != nullptr;
+	return on;
+}
+
+std::atomic<bool> s_boxSelect{false};
+
+// GeneralsX @feature HishamAbulfeilat 28/09/2026 Pinch zoom is continuous: the wheel delta is
+// proportional to the log of the finger-distance change (fractional wheel values reach the
+// camera unrounded, Mouse.cpp), instead of whole notches per 3% step, which felt jumpy or
+// dead on large high-dpi panels. PINCH_WHEEL_PER_E is notches per e-fold of distance.
+const float PINCH_WHEEL_PER_E = 5.0f;
+const float PINCH_MIN_WHEEL = 0.04f;
+// Two fingers down and up again this quickly without moving = right click (deselect,
+// including a selected building, which a one-finger tap can't deselect).
+const Uint64 TWO_FINGER_TAP_MS = 350;
 // GeneralsX @android FadiLabib 07/07/2026 - Two fingers rarely touch down in the
 // same SDL event: finger1's own motion can cross the drag threshold a few ms
 // before finger2's FINGER_DOWN is delivered, prematurely committing a real LMB
@@ -196,10 +240,6 @@ const Uint64 SECOND_FINGER_GRACE_MS = 60;
 // to select every same-type unit on screen). Matches SDL's default 500 ms
 // multi-click window; the position slop reuses the gesture threshold.
 const Uint64 DOUBLE_TAP_MS = 500;
-// GeneralsX @android FadiLabib 07/07/2026 - 3% per tick (was 6%): with the
-// pan/pinch mode lock below, zoom no longer fights camera pan, and the finer
-// step doubles the wheel-tick rate for a smoother zoom feel.
-const float PINCH_STEP_RATIO = 0.03f;  // 3% distance change per wheel tick
 
 // GeneralsX @android FadiLabib 07/07/2026 - Two-finger pan speed. The engine's
 // RMB scroll is a velocity joystick (scroll speed grows with cursor distance from
@@ -305,8 +345,22 @@ void sendSyntheticMouse(SDL3Mouse *mouse, SDL_Window *window, Uint32 type,
 // either, so we classify first: whichever crosses the movement threshold first
 // — centroid travel (pan) or finger-distance change (pinch) — locks the gesture
 // mode until a finger lifts. The loser is ignored for the rest of the gesture.
+// Where the camera pan is steered from: the finger for a one-finger pan, else the centroid.
+void panPoint(int winW, int winH, float &x, float &y)
+{
+	if (s_touch.singlePan) {
+		x = s_touch.f1x * (float)winW;
+		y = s_touch.f1y * (float)winH;
+	} else {
+		x = (s_touch.f1x + s_touch.f2x) * 0.5f * (float)winW;
+		y = (s_touch.f1y + s_touch.f2y) * 0.5f * (float)winH;
+	}
+}
+
 void beginTwoPending(int winW, int winH)
 {
+	s_touch.twoDownTicks = SDL_GetTicks();
+	s_touch.singlePan = false;
 	s_touch.twoCx0 = (s_touch.f1x + s_touch.f2x) * 0.5f * (float)winW;
 	s_touch.twoCy0 = (s_touch.f1y + s_touch.f2y) * 0.5f * (float)winH;
 	const float dx = (s_touch.f1x - s_touch.f2x) * (float)winW;
@@ -319,8 +373,7 @@ void beginPan(SDL3Mouse *mouse, SDL_Window *window, int winW, int winH)
 {
 	// panX/panY is the FIXED scroll anchor (matches the engine's RMB-down anchor);
 	// panLast tracks the rolling centroid, panAccum the delta flushed each frame.
-	s_touch.panX = (s_touch.f1x + s_touch.f2x) * 0.5f * (float)winW;
-	s_touch.panY = (s_touch.f1y + s_touch.f2y) * 0.5f * (float)winH;
+	panPoint(winW, winH, s_touch.panX, s_touch.panY);
 	s_touch.panLastX = s_touch.panX;
 	s_touch.panLastY = s_touch.panY;
 	s_touch.panAccumX = 0.0f;
@@ -382,6 +435,16 @@ void handleTouchEvent(SDL3Mouse *mouse, SDL_Window *window, const SDL_Event &eve
 			                   s_touch.lastX, s_touch.lastY, SDL_BUTTON_LEFT);
 			beginTwoPending(winW, winH);
 		}
+		else if (s_touch.phase == TouchState::PAN && s_touch.singlePan) {
+			// Mobile scheme: a second finger during a one-finger camera drag starts a
+			// two-finger gesture (pinch zoom); end the drag-scroll first.
+			sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_BUTTON_UP,
+			                   s_touch.panLastX, s_touch.panLastY, SDL_BUTTON_RIGHT);
+			s_touch.finger2 = event.tfinger.fingerID;
+			s_touch.f2x = event.tfinger.x;
+			s_touch.f2y = event.tfinger.y;
+			beginTwoPending(winW, winH);
+		}
 		// LONGPRESSED / TWO_PENDING / PAN / PINCH with extra fingers: ignored
 		break;
 
@@ -431,18 +494,24 @@ void handleTouchEvent(SDL3Mouse *mouse, SDL_Window *window, const SDL_Event &eve
 				// Pinch wins: zoom only, camera never moves.
 				s_touch.pinchDist = dist;
 				s_touch.phase = TouchState::PINCH;
+				if (debugEnabled()) {
+					fprintf(stderr, "[touch] two fingers -> pinch (distance %+.0f px)\n", dist - s_touch.twoDist0);
+				}
 			}
 			else if (centroidMoved >= threshold) {
 				// Pan wins: RMB camera scroll only, zoom never fires.
 				beginPan(mouse, window, winW, winH);
+				if (debugEnabled()) {
+					fprintf(stderr, "[touch] two fingers -> pan\n");
+				}
 			}
 		}
 		else if (s_touch.phase == TouchState::PAN) {
 			// Accumulate finger travel; the actual motion (anchor + delta) is emitted
 			// once per engine frame in updateTouchLongPress so the scroll speed is
 			// independent of the touch sampling rate.
-			const float cx = (s_touch.f1x + s_touch.f2x) * 0.5f * (float)winW;
-			const float cy = (s_touch.f1y + s_touch.f2y) * 0.5f * (float)winH;
+			float cx = 0.0f, cy = 0.0f;
+			panPoint(winW, winH, cx, cy);
 			s_touch.panAccumX += cx - s_touch.panLastX;
 			s_touch.panAccumY += cy - s_touch.panLastY;
 			s_touch.panLastX = cx;
@@ -454,16 +523,15 @@ void handleTouchEvent(SDL3Mouse *mouse, SDL_Window *window, const SDL_Event &eve
 			const float dx = (s_touch.f1x - s_touch.f2x) * (float)winW;
 			const float dy = (s_touch.f1y - s_touch.f2y) * (float)winH;
 			const float dist = SDL_sqrtf(dx * dx + dy * dy);
-			if (s_touch.pinchDist > 1.0f) {
-				const float ratio = dist / s_touch.pinchDist;
-				if (ratio > 1.0f + PINCH_STEP_RATIO) {
+			if (s_touch.pinchDist > 1.0f && dist > 1.0f) {
+				const float wheel = SDL_logf(dist / s_touch.pinchDist) * PINCH_WHEEL_PER_E;
+				if (SDL_fabsf(wheel) >= PINCH_MIN_WHEEL) {
 					sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_MOTION, cx, cy);
-					sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_WHEEL, cx, cy, 0, 1.0f);
+					sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_WHEEL, cx, cy, 0, wheel);
 					s_touch.pinchDist = dist;
-				} else if (ratio < 1.0f - PINCH_STEP_RATIO) {
-					sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_MOTION, cx, cy);
-					sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_WHEEL, cx, cy, 0, -1.0f);
-					s_touch.pinchDist = dist;
+					if (debugEnabled()) {
+						fprintf(stderr, "[touch] pinch wheel %+.2f\n", wheel);
+					}
 				}
 			}
 		}
@@ -524,11 +592,27 @@ void handleTouchEvent(SDL3Mouse *mouse, SDL_Window *window, const SDL_Event &eve
 				sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_BUTTON_UP,
 				                   s_touch.panLastX, s_touch.panLastY, SDL_BUTTON_RIGHT);
 				break;
-			// TWO_PENDING / PINCH hold no buttons — nothing to release.
+			case TouchState::TWO_PENDING:
+				// Neither pan nor pinch happened: a quick two-finger tap is a right click
+				// at the midpoint (deselect everything, including a selected building).
+				if (event.type != SDL_EVENT_FINGER_CANCELED &&
+				    (SDL_GetTicks() - s_touch.twoDownTicks) <= TWO_FINGER_TAP_MS) {
+					const float cx = (s_touch.f1x + s_touch.f2x) * 0.5f * (float)winW;
+					const float cy = (s_touch.f1y + s_touch.f2y) * 0.5f * (float)winH;
+					sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_MOTION, cx, cy);
+					sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_BUTTON_DOWN, cx, cy, SDL_BUTTON_RIGHT);
+					sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_BUTTON_UP, cx, cy, SDL_BUTTON_RIGHT);
+					if (debugEnabled()) {
+						fprintf(stderr, "[touch] two-finger tap -> right click\n");
+					}
+				}
+				break;
+			// PINCH holds no buttons — nothing to release.
 			default:
 				break;
 		}
 		s_touch.phase = TouchState::IDLE;
+		s_touch.singlePan = false;
 		break;
 	}
 }
@@ -552,6 +636,18 @@ void updateTouchLongPress(SDL3Mouse *mouse, SDL_Window *window)
 	// Threshold was crossed but the LMB commit was deferred (see
 	// SECOND_FINGER_GRACE_MS above) — if the grace window has passed with no
 	// second finger, this really is a single-finger drag: commit it now.
+	if (s_touch.phase == TouchState::PENDING && s_touch.thresholdCrossed &&
+	    (SDL_GetTicks() - s_touch.thresholdCrossedTicks) >= SECOND_FINGER_GRACE_MS &&
+	    touchMobileScheme() && !s_boxSelect.load()) {
+		// Mobile scheme: one finger drags the camera like two fingers do in classic.
+		int winW = 0, winH = 0;
+		SDL_GetWindowSize(window, &winW, &winH);
+		s_touch.singlePan = true;
+		beginPan(mouse, window, winW, winH);
+		if (debugEnabled()) {
+			fprintf(stderr, "[touch] one finger -> pan\n");
+		}
+	}
 	if (s_touch.phase == TouchState::PENDING && s_touch.thresholdCrossed &&
 	    (SDL_GetTicks() - s_touch.thresholdCrossedTicks) >= SECOND_FINGER_GRACE_MS) {
 		sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_MOTION, s_touch.downX, s_touch.downY);
@@ -589,7 +685,129 @@ void updateTouchLongPress(SDL3Mouse *mouse, SDL_Window *window)
 	}
 }
 
+// GeneralsX @feature HishamAbulfeilat 28/09/2026 Quick commands from the on-screen key bar
+// (TouchKeyBar.java -> JNI below, on Android's UI thread). Queued and run here on the engine
+// thread, through the same messages the control bar / hotkeys use.
+enum QuickCommand {
+	QUICK_SELECT_ARMY = 1,  // select every combat unit (MSG_META_SELECT_ALL, the "Q" hotkey)
+	QUICK_ATTACK_MOVE = 2,  // attack-move mode: the next tap orders an attack-move there
+	QUICK_GUARD = 3,        // guard mode: the next tap picks the area to guard
+	QUICK_STOP = 4,
+	QUICK_DESELECT = 5,
+	QUICK_ARMY_ATTACK = 6   // select the army, then attack-move mode
+};
+
+std::mutex s_quickMutex;
+std::vector<int> s_quickCommands;
+
+void runQuickCommand(int command)
+{
+	if (TheGameLogic == nullptr || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame()
+	    || TheInGameUI == nullptr || TheMessageStream == nullptr) {
+		return;
+	}
+	switch (command) {
+		case QUICK_SELECT_ARMY:
+			TheMessageStream->appendMessage(GameMessage::MSG_META_SELECT_ALL);
+			break;
+		case QUICK_ARMY_ATTACK:
+			TheMessageStream->appendMessage(GameMessage::MSG_META_SELECT_ALL);
+			TheMessageStream->appendMessage(GameMessage::MSG_META_TOGGLE_ATTACKMOVE);
+			break;
+		case QUICK_ATTACK_MOVE:
+			TheMessageStream->appendMessage(GameMessage::MSG_META_TOGGLE_ATTACKMOVE);
+			break;
+		case QUICK_GUARD:
+			if (TheControlBar != nullptr) {
+				const CommandButton *guard = TheControlBar->findCommandButton("Command_Guard");
+				if (guard != nullptr) {
+					TheInGameUI->setGUICommand(guard);
+				}
+			}
+			break;
+		case QUICK_STOP:
+			TheMessageStream->appendMessage(GameMessage::MSG_META_STOP);
+			break;
+		case QUICK_DESELECT:
+			TheInGameUI->deselectAllDrawables();
+			break;
+		default:
+			break;
+	}
+	if (debugEnabled()) {
+		fprintf(stderr, "[touch] quick command %d\n", command);
+	}
+}
+
+void processQuickCommands()
+{
+	std::vector<int> pending;
+	{
+		std::lock_guard<std::mutex> lock(s_quickMutex);
+		pending.swap(s_quickCommands);
+	}
+	for (int command : pending) {
+		runQuickCommand(command);
+	}
+}
+
+// GeneralsX @feature HishamAbulfeilat 28/09/2026 Debug mode: every 5 s, log frame rate, average
+// and worst frame time and resident memory, so a debug session's game.log shows where
+// performance drops (map, unit count, effects) next to what the engine was doing.
+void logFrameStats()
+{
+	static Uint64 windowStart = 0;
+	static Uint64 lastFrame = 0;
+	static Uint64 worst = 0;
+	static int frames = 0;
+	const Uint64 now = SDL_GetTicksNS();
+	if (lastFrame != 0 && now - lastFrame > worst) {
+		worst = now - lastFrame;
+	}
+	lastFrame = now;
+	if (windowStart == 0) {
+		windowStart = now;
+	}
+	++frames;
+	const Uint64 elapsed = now - windowStart;
+	if (elapsed < 5000000000ULL) {
+		return;
+	}
+	long rssPages = 0;
+	FILE *statm = fopen("/proc/self/statm", "r");
+	if (statm != nullptr) {
+		long sizePages = 0;
+		if (fscanf(statm, "%ld %ld", &sizePages, &rssPages) != 2) {
+			rssPages = 0;
+		}
+		fclose(statm);
+	}
+	const double seconds = (double)elapsed / 1e9;
+	fprintf(stderr, "[perf] fps=%.1f avg=%.1fms worst=%.1fms rss=%ldMB ingame=%d\n",
+	        frames / seconds, seconds * 1000.0 / frames, (double)worst / 1e6,
+	        rssPages * (long)sysconf(_SC_PAGESIZE) / (1024 * 1024),
+	        (TheGameLogic != nullptr && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame()) ? 1 : 0);
+	windowStart = now;
+	frames = 0;
+	worst = 0;
+}
+
 } // anonymous namespace
+
+#if defined(__ANDROID__)
+extern "C" JNIEXPORT void JNICALL
+Java_com_generalsx_generalszh_TouchKeyBar_nativeQuickCommand(JNIEnv *, jclass, jint command)
+{
+	std::lock_guard<std::mutex> lock(s_quickMutex);
+	s_quickCommands.push_back((int)command);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_generalsx_generalszh_TouchKeyBar_nativeSetBoxSelect(JNIEnv *, jclass, jboolean on)
+{
+	s_boxSelect.store(on == JNI_TRUE);
+}
+#endif
 #endif // GX_TOUCH_UI
 
 namespace {
@@ -943,6 +1161,10 @@ void SDL3GameEngine::pollSDL3Events(void)
 		if (touchMouse) {
 			updateTouchLongPress(touchMouse, m_SDLWindow);
 		}
+	}
+	processQuickCommands();
+	if (debugEnabled()) {
+		logFrameStats();
 	}
 #endif
 }

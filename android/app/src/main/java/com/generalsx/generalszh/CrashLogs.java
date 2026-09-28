@@ -74,8 +74,15 @@ final class CrashLogs {
         appendFile(r, "ReleaseCrashInfo.txt", new File(userDataDir(context), "ReleaseCrashInfo.txt"), 256 * 1024);
         appendFile(r, "ReleaseCrashInfoPrev.txt", new File(userDataDir(context), "ReleaseCrashInfoPrev.txt"), 64 * 1024);
         appendFile(r, "Options.ini", new File(userDataDir(context), "Options.ini"), 64 * 1024);
-        appendFile(r, "game.log (last run)", new File(logDir(context), "game.log"), 1536 * 1024);
-        appendFile(r, "game-prev.log (run before)", new File(logDir(context), "game-prev.log"), 512 * 1024);
+        // Debug mode (LaunchOptions) records whole sessions: keep much more of them.
+        boolean debug = LaunchOptions.debug(context);
+        int mb = 1024 * 1024;
+        appendFile(r, "game.log (last run)", new File(logDir(context), "game.log"), debug ? 8 * mb : 1536 * 1024);
+        appendFile(r, "game-prev.log (run before)", new File(logDir(context), "game-prev.log"), debug ? 2 * mb : 512 * 1024);
+        if (debug || DebugSession.sessionLog(context).isFile()) {
+            appendFile(r, "logcat-session.txt (debug mode: whole last session)",
+                    DebugSession.sessionLog(context), 8 * mb);
+        }
         appendLogcat(r);
         return r.toString();
     }
@@ -115,6 +122,10 @@ final class CrashLogs {
             }
         }
         r.append("Enabled mods: ").append(mods.length() > 0 ? mods : "none").append('\n');
+        r.append("Debug mode: ").append(LaunchOptions.debug(context) ? "on" : "off")
+                .append(", FPS overlay: ").append(LaunchOptions.fpsOverlay(context) ? "on" : "off")
+                .append(", touch: ").append(LaunchOptions.mobileTouch(context) ? "mobile" : "classic")
+                .append('\n');
     }
 
     private static void appendExits(Context context, StringBuilder r) {

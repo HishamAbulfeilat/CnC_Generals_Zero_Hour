@@ -209,6 +209,21 @@ adb exec-out screencap -p > check.png          # submenu (USA/GLA/CHINA/...) mus
 Pan/pinch/drag-box feel can't be exercised through adb (no multitouch injection) —
 those need fingers on glass in a skirmish.
 
+## Android additions (28/09/2026)
+
+- **Pinch** is continuous: wheel delta = ln(distance ratio) x 5 notches, fractional values
+  pass to the camera unrounded (was whole notches per 3% step).
+- **Two-finger tap** (both fingers down and up within 350 ms, no pan/pinch) = right click at
+  the midpoint: deselects anything, including a selected building.
+- **Mobile scheme** (launcher Settings, `GX_TOUCH_SCHEME=mobile`): one finger drags the camera
+  (same 1:1 RMB-scroll path as the two-finger pan, `singlePan`); a second finger turns it into
+  a pinch; the key bar's **Box** latch makes one-finger drags draw a selection box again.
+- **Quick commands** (key bar top row, `nativeQuickCommand` -> engine thread): Army
+  (`MSG_META_SELECT_ALL`), Army attack (select all + `MSG_META_TOGGLE_ATTACKMOVE`),
+  Attack-move, Guard (`Command_Guard` button via `setGUICommand`), Stop (`MSG_META_STOP`),
+  Deselect (`deselectAllDrawables`). Language-independent, unlike hotkey letters.
+- Debug mode logs every gesture decision as `[touch] ...` in game.log.
+
 ## Known limitations / future work
 
 - Gesture feel unvalidated in real matches (box-select under pressure, pan/zoom

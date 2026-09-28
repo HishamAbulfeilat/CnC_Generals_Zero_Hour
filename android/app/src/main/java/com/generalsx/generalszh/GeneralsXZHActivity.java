@@ -24,6 +24,8 @@ public class GeneralsXZHActivity extends SDLActivity {
 
     /** On-screen Esc/modifier/group keys (null if SDL failed to set up its layout). */
     private TouchKeyBar keyBar;
+    /** Debug mode's logcat/thermal recording (null when debug mode is off). */
+    private DebugSession debugSession;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -41,10 +43,22 @@ public class GeneralsXZHActivity extends SDLActivity {
                 Log.w("GeneralsX", "setenv " + GameDataPaths.ENV_GAME_DATA_DIR + " failed", e);
             }
         }
+        // Debug mode / FPS overlay / touch scheme from the launcher (LaunchOptions); the
+        // native library reads them once it starts, after super.onCreate.
+        LaunchOptions.exportToEnvironment(this);
+        debugSession = DebugSession.startIfEnabled(this);
         super.onCreate(savedInstanceState);
         if (mLayout != null && !TouchKeyBar.isHidden(this)) {
-            keyBar = TouchKeyBar.attach(this, mLayout);
+            keyBar = TouchKeyBar.attach(this, mLayout, LaunchOptions.mobileTouch(this));
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (debugSession != null) {
+            debugSession.stop();
+        }
+        super.onDestroy();
     }
 
     @Override
