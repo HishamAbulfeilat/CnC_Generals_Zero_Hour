@@ -6,7 +6,10 @@ android {
     defaultConfig {
         applicationId project.findProperty('GX_APP_ID') ?: 'com.generalsx.generalszh'
         minSdk 29
-        targetSdk 29   // sideload-only: keeps requestLegacyExternalStorage effective
+        // GeneralsX @build HishamAbulfeilat 29/09/2026 Target current Android: Play Protect warns
+        // about (and newer Android blocks) sideloaded apps built for old versions (29 = Android
+        // 10). Game data lives in app-specific storage, so scoped storage is no obstacle.
+        targetSdk 34
         // CI passes the workflow run number so every release installs over the last one.
         versionCode((project.findProperty('GX_VERSION_CODE') ?: '1') as int)
         versionName project.findProperty('GX_VERSION_NAME') ?: '1.04'
@@ -31,6 +34,20 @@ android {
                 signingConfig signingConfigs.gxRelease
             }
         }
+        // GeneralsX @build HishamAbulfeilat 29/09/2026 Releases ship the release build: a
+        // debuggable APK is treated as untrusted by Play Protect. No minification (JNI and SDL
+        // reflection), release key when configured, else the machine's debug key so local
+        // builds still install.
+        release {
+            debuggable false
+            minifyEnabled false
+            signingConfig project.hasProperty('GX_KEYSTORE') ? signingConfigs.gxRelease : signingConfigs.debug
+        }
+    }
+    lint {
+        // Lint runs on release builds by default; it is not a release gate for this port.
+        checkReleaseBuilds false
+        abortOnError false
     }
     // GeneralsX @build FadiLabib 07/07/2026 - adrenotools REQUIRES legacy packaging.
     // With the modern (default) packaging Android leaves native libs compressed in

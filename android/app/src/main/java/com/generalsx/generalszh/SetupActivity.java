@@ -585,6 +585,12 @@ public class SetupActivity extends Activity {
         if (!checkFreeSpace(GameDataPaths.appDataDir(this))) {
             return;
         }
+        // Android 13+: the download's progress notification needs this permission; the
+        // download itself runs either way.
+        if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(
+                android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] { android.Manifest.permission.POST_NOTIFICATIONS }, 0);
+        }
         if (SteamLoginStore.savedAccountName(this) != null) {
             setBusy(true, true);
             DownloadService.startWithSavedLogin(this);

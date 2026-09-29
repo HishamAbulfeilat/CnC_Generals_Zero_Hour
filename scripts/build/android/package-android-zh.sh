@@ -2,7 +2,7 @@
 # Package the Android build of Zero Hour into a debug APK and optionally install it.
 #
 # Flow: verify artifacts -> copy .so's into jniLibs -> copy SDL3 Java glue ->
-#       gradle assembleDebug -> optional adb install.
+#       gradle assembleRelease -> optional adb install.
 # Usage: ./scripts/build/android/package-android-zh.sh [--install]
 set -euo pipefail
 
@@ -114,8 +114,9 @@ mkdir -p "${SDL_JAVA_DST}"
 cp -R "${SDL_JAVA_SRC}/org" "${SDL_JAVA_DST}/"
 echo "  copied SDL3 Java glue"
 
-( cd "${ANDROID_DIR}" && gradle assembleDebug --console=plain )
-APK="${ANDROID_DIR}/app/build/outputs/apk/debug/app-debug.apk"
+# GeneralsX @build HishamAbulfeilat 29/09/2026 Release build (not debuggable), see build.gradle.
+( cd "${ANDROID_DIR}" && gradle assembleRelease --console=plain )
+APK="${ANDROID_DIR}/app/build/outputs/apk/release/app-release.apk"
 [[ -f "${APK}" ]] || { echo "ERROR: APK not produced" >&2; exit 1; }
 echo "==> APK ready: ${APK}"
 

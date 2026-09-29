@@ -47,7 +47,7 @@ ls ~/Android/Sdk/ndk/27.2.12479018/build/cmake/android.toolchain.cmake
 ### 2. Gradle 8.9
 
 Download the Gradle 8.9 distribution and unpack it to `~/Android/gradle/gradle-8.9` (the
-packaging step drives `gradle assembleDebug` directly, no wrapper is checked in).
+packaging step drives `gradle assembleRelease` directly, no wrapper is checked in).
 
 ```bash
 ls ~/Android/gradle/gradle-8.9/bin/gradle
@@ -166,13 +166,13 @@ This script:
 3. Copies `libmain.so`, `libSDL3.so`, `libSDL3_image.so`, `libopenal.so` (and `libgamespy.so`
    if present) into `android/app/jniLibs/arm64-v8a/`
 4. Copies the SDL3 Android Java glue into `android/app/sdl-java/`
-5. Runs `gradle assembleDebug`
+5. Runs `gradle assembleRelease`
 6. With `--install`, runs `adb install -r` and grants storage permissions
 
 Output APK (~225 MB debug build):
 
 ```
-android/app/build/outputs/apk/debug/app-debug.apk
+android/app/build/outputs/apk/release/app-release.apk
 ```
 
 App id: `com.generalsx.generalszh`. Main activity: `.GeneralsXZHActivity`.
@@ -609,7 +609,7 @@ Adreno flagships (Vulkan 1.3 floor). Codebase findings that fed this plan:
 | Script | Purpose |
 |--------|---------|
 | `scripts/build/android/check-android-env.sh` | Verify NDK/SDK/vcpkg/cmake/ninja/java + device state |
-| `scripts/build/android/package-android-zh.sh` | Verify `libmain.so` artifact, embed .so's + SDL3 Java glue, `gradle assembleDebug`, optional install |
+| `scripts/build/android/package-android-zh.sh` | Verify `libmain.so` artifact, embed .so's + SDL3 Java glue, `gradle assembleRelease`, optional install |
 | `scripts/build/android/push-assets-android.sh` | Push filtered retail assets + staged fonts to `/sdcard/GeneralsZH` |
 | `scripts/build/android/run-headless-replay.sh` | Push + launch `-headless -replay`, poll for completion, report PASS/FAIL |
 | `scripts/build/android/smoke-test-android.sh` | One-command regression gate: record a fresh skirmish, replay it, assert exit 0 + CRC-clean |
