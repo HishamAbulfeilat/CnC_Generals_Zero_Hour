@@ -25,8 +25,10 @@ import android.widget.TextView;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -49,6 +51,14 @@ public class SetupActivity extends Activity {
     private static final int REQUEST_PICK_FOLDER = 1;
     private static final int REQUEST_PICK_MAPS = 2;
     private static final int REQUEST_SAVE_LOGS = 3;
+    private static final int REQUEST_BACKUP = 4;
+    private static final int REQUEST_RESTORE = 5;
+    private static final int REQUEST_IMPORT_REPLAYS = 6;
+    private static final int REQUEST_EXPORT_REPLAY = 7;
+    private static final String PREFS = "launcher";
+    private static final String KEY_AUTOSAVE_SEEN = "autosave_seen";
+    /** Replay chosen in the Replays list, written by the next REQUEST_EXPORT_REPLAY result. */
+    private File replayToExport;
     private static final String STEAM_STORE_URL =
             "https://store.steampowered.com/app/" + GameDataPaths.STEAM_APP_ID + "/";
     /**
@@ -85,7 +95,30 @@ public class SetupActivity extends Activity {
         DownloadService.setUiAuthenticator(authenticator);
         if (savedInstanceState == null) {
             offerLogsAfterCrash();
+            if (readyDataDir != null) {
+                showAutosaveHint();
+            }
         }
+    }
+
+    /**
+     * The engine saves a single-player match when the app goes to the background
+     * (SDL3GameEngine.cpp); if the game was closed since, say once where to find it.
+     */
+    private void showAutosaveHint() {
+        File autosave = PlayerData.autosave(this);
+        if (!autosave.isFile()) {
+            return;
+        }
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        long saved = autosave.lastModified();
+        if (prefs.getLong(KEY_AUTOSAVE_SEEN, 0) >= saved) {
+            return;
+        }
+        prefs.edit().putLong(KEY_AUTOSAVE_SEEN, saved).apply();
+        status.setText("Your last match was saved automatically when you left the game ("
+                + java.text.DateFormat.getDateTimeInstance().format(new Date(saved))
+                + "). To continue it: Play, then Load Game and pick \"Android autosave\".");
     }
 
     @Override
@@ -200,6 +233,8 @@ public class SetupActivity extends Activity {
         buttonList.add(button("Settings", v -> startActivity(new Intent(this, SettingsActivity.class))));
         buttonList.add(button("Mods", v -> startActivity(new Intent(this, ModsActivity.class))));
         buttonList.add(button("Add maps", v -> pickMapsFolder()));
+        buttonList.add(button("Replays", v -> showReplays()));
+        buttonList.add(button("Backup & restore", v -> showBackupMenu()));
         buttonList.add(button("Update game files", v -> onUpdateGameFiles()));
         buttonList.add(button("Clear caches", v -> onClearCaches()));
         buttonList.add(button("Check for app updates", v -> onCheckForAppUpdate()));
@@ -671,14 +706,160 @@ public class SetupActivity extends Activity {
         });
     }
 
+    // ---------------------------------------------------------------------------------
+    // Saves, replays, settings (PlayerData)
+
+    private void showBackupMenu() {
+        new AlertDialog.Builder(this)
+                .setTitle("Backup & restore")
+                .setMessage("Saved games, replays, your added maps and game settings are stored inside"
+                        + " the app and are deleted if it is uninstalled. Keep a backup file anywhere"
+                        + " (Downloads, Google Drive, a PC) and restore it later.")
+                .setPositiveButton("Back up", (d, w) -> {
+                    String stamp = new SimpleDateFormat("yyyyMMdd-HHmm", Locale.ROOT).format(new Date());
+                    startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                            .addCategory(Intent.CATEGORY_OPENABLE)
+                            .setType("application/zip")
+                            .putExtra(Intent.EXTRA_TITLE, "GeneralsZH-backup-" + stamp + ".zip"),
+                            REQUEST_BACKUP);
+                })
+                .setNeutralButton("Restore", (d, w) -> startActivityForResult(
+                        new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                                .addCategory(Intent.CATEGORY_OPENABLE)
+                                .setType("application/zip"),
+                        REQUEST_RESTORE))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void showReplays() {
+        List<File> replays = PlayerData.replays(this);
+        String[] items = new String[replays.size() + 1];
+        items[0] = "Import replay files…";
+        DateFormat when = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT);
+        for (int i = 0; i < replays.size(); i++) {
+            File f = replays.get(i);
+            items[i + 1] = f.getName() + "  (" + when.format(new Date(f.lastModified())) + ")";
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(replays.isEmpty() ? "Replays (none yet)" : "Replays: tap one to save a copy")
+                .setItems(items, (d, which) -> {
+                    if (which == 0) {
+                        startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                                .addCategory(Intent.CATEGORY_OPENABLE)
+                                .setType("*/*")
+                                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true),
+                                REQUEST_IMPORT_REPLAYS);
+                    } else {
+                        replayToExport = replays.get(which - 1);
+                        startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                                .addCategory(Intent.CATEGORY_OPENABLE)
+                                .setType("application/octet-stream")
+                                .putExtra(Intent.EXTRA_TITLE, replayToExport.getName()),
+                                REQUEST_EXPORT_REPLAY);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /** Runs {@code work} off the UI thread and shows its result (or error) in the status line. */
+    private void runFileTask(String busyText, java.util.concurrent.Callable<String> work) {
+        status.setText(busyText);
+        new Thread(() -> {
+            String message;
+            try {
+                message = work.call();
+            } catch (Exception e) {
+                message = "Failed: " + e.getMessage();
+            }
+            String shown = message;
+            runOnUiThread(() -> status.setText(shown));
+        }, "PlayerData").start();
+    }
+
+    private void importReplays(Intent data) {
+        List<Uri> uris = new ArrayList<>();
+        if (data.getClipData() != null) {
+            for (int i = 0; i < data.getClipData().getItemCount(); i++) {
+                uris.add(data.getClipData().getItemAt(i).getUri());
+            }
+        } else if (data.getData() != null) {
+            uris.add(data.getData());
+        }
+        runFileTask("Importing replays…", () -> {
+            for (Uri uri : uris) {
+                try (InputStream in = getContentResolver().openInputStream(uri)) {
+                    if (in == null) {
+                        throw new IOException("cannot open " + uri);
+                    }
+                    PlayerData.importReplay(this, displayName(uri), in);
+                }
+            }
+            return "Imported " + uris.size() + (uris.size() == 1 ? " replay" : " replays")
+                    + ". Watch them in the game: Load Replay.";
+        });
+    }
+
+    private String displayName(Uri uri) {
+        try (android.database.Cursor c = getContentResolver().query(uri,
+                new String[] { android.provider.OpenableColumns.DISPLAY_NAME }, null, null, null)) {
+            if (c != null && c.moveToFirst() && c.getString(0) != null) {
+                return c.getString(0);
+            }
+        }
+        return "Imported-" + System.currentTimeMillis() + ".rep";
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+        if (resultCode != RESULT_OK || data == null) {
+            return;
+        }
+        if (requestCode == REQUEST_IMPORT_REPLAYS) {
+            importReplays(data);
+            return;
+        }
+        if (data.getData() == null) {
             return;
         }
         Uri tree = data.getData();
-        if (requestCode == REQUEST_SAVE_LOGS) {
+        if (requestCode == REQUEST_BACKUP) {
+            runFileTask("Backing up…", () -> {
+                try (OutputStream out = getContentResolver().openOutputStream(tree)) {
+                    if (out == null) {
+                        throw new IOException("cannot open the chosen file");
+                    }
+                    return "Backed up " + PlayerData.backup(this, out) + " files.";
+                }
+            });
+        } else if (requestCode == REQUEST_RESTORE) {
+            runFileTask("Restoring…", () -> {
+                try (InputStream in = getContentResolver().openInputStream(tree)) {
+                    if (in == null) {
+                        throw new IOException("cannot open the chosen file");
+                    }
+                    return "Restored " + PlayerData.restore(this, in) + " files.";
+                }
+            });
+        } else if (requestCode == REQUEST_EXPORT_REPLAY && replayToExport != null) {
+            File replay = replayToExport;
+            runFileTask("Saving replay…", () -> {
+                try (OutputStream out = getContentResolver().openOutputStream(tree);
+                     InputStream in = new java.io.FileInputStream(replay)) {
+                    if (out == null) {
+                        throw new IOException("cannot open the chosen file");
+                    }
+                    byte[] buffer = new byte[64 * 1024];
+                    int n;
+                    while ((n = in.read(buffer)) > 0) {
+                        out.write(buffer, 0, n);
+                    }
+                }
+                return "Saved " + replay.getName() + ".";
+            });
+        } else if (requestCode == REQUEST_SAVE_LOGS) {
             writeLogs(tree);
         } else if (requestCode == REQUEST_PICK_FOLDER) {
             importGame(tree);

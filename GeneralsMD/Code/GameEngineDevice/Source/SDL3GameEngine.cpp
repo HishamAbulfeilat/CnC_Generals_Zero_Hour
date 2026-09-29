@@ -81,6 +81,8 @@ extern GameWindowManager *TheWindowManager;
 #include <mutex>
 #include <vector>
 #include <unistd.h>
+#include "Common/FramePacer.h"
+#include "Common/GameState.h"
 #include "Common/MessageStream.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/InGameUI.h"
@@ -112,6 +114,69 @@ extern GameWindowManager *TheWindowManager;
 // multitasking a few times"). Pause whenever either is set.
 static std::atomic<bool> s_appBackgrounded{false};
 static std::atomic<bool> s_appInactive{false};
+
+// GeneralsX @feature HishamAbulfeilat 28/09/2026 Android: while the app is in the background
+// Android may end the process at any time (memory pressure), losing a single-player match.
+// On the first paused frame after entering the background, save it to a fixed slot; the
+// launcher points the player at it if the game was closed meanwhile.
+static bool s_autosavedThisPause = false;
+static const char *const ANDROID_AUTOSAVE_FILE = "AndroidAutosave.sav";
+
+static void autosaveOnceWhileBackgrounded()
+{
+	if (!s_appBackgrounded.load() || s_autosavedThisPause) {
+		return;
+	}
+	s_autosavedThisPause = true;
+	if (TheGameLogic == nullptr || TheGameState == nullptr || !TheGameLogic->isInGame()
+	    || TheGameLogic->isInShellGame() || TheGameLogic->isInMultiplayerGame()
+	    || TheGameLogic->isInReplayGame()) {
+		return;
+	}
+	UnicodeString desc;
+	desc.translate(AsciiString("Android autosave"));
+	const SaveCode code = TheGameState->saveGame(ANDROID_AUTOSAVE_FILE, desc, SAVE_FILE_TYPE_NORMAL);
+	fprintf(stderr, "INFO: background autosave -> %s (code %d)\n", ANDROID_AUTOSAVE_FILE, (int)code);
+}
+
+// GeneralsX @feature HishamAbulfeilat 28/09/2026 Render frame-rate cap chosen in the launcher
+// (GX_RENDER_FPS, 0 = game default) and a lower cap the launcher requests while the phone
+// is thermally throttling (nativeSetThermalFpsCap). The simulation runs at its own fixed
+// rate, so neither changes game speed or multiplayer sync.
+static std::atomic<int> s_thermalFpsCap{0};
+static int s_appliedFpsCap = -1;
+
+static int userFpsCap()
+{
+	static const int cap = [] {
+		const char *value = getenv("GX_RENDER_FPS");
+		return value != nullptr ? atoi(value) : 0;
+	}();
+	return cap;
+}
+
+static void applyFpsCaps()
+{
+	if (TheFramePacer == nullptr || TheWritableGlobalData == nullptr) {
+		return;
+	}
+	int cap = userFpsCap();
+	const int thermal = s_thermalFpsCap.load();
+	if (thermal > 0 && (cap <= 0 || thermal < cap)) {
+		cap = thermal;
+	}
+	if (cap == s_appliedFpsCap) {
+		return;
+	}
+	s_appliedFpsCap = cap;
+	if (cap <= 0) {
+		return;
+	}
+	TheWritableGlobalData->m_framesPerSecondLimit = cap;
+	TheWritableGlobalData->m_useFpsLimit = true;
+	TheFramePacer->setFramesPerSecondLimit(cap);
+	fprintf(stderr, "INFO: render FPS cap %d%s\n", cap, thermal > 0 ? " (thermal)" : "");
+}
 
 static inline bool iosShouldPauseRendering()
 {
@@ -216,6 +281,30 @@ bool debugEnabled()
 }
 
 std::atomic<bool> s_boxSelect{false};
+
+// GeneralsX @feature HishamAbulfeilat 28/09/2026 Short vibration when a gesture turns into a
+// command the player can't see yet (long-press / two-finger right click). Android calls the
+// activity's gxHaptic(), which honours the player's setting; other platforms: nothing.
+void touchHaptic()
+{
+#if defined(__ANDROID__)
+	JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+	jobject activity = (jobject)SDL_GetAndroidActivity();
+	if (env == nullptr || activity == nullptr) {
+		return;
+	}
+	jclass cls = env->GetObjectClass(activity);
+	jmethodID method = env->GetMethodID(cls, "gxHaptic", "()V");
+	if (method != nullptr) {
+		env->CallVoidMethod(activity, method);
+	}
+	if (env->ExceptionCheck()) {
+		env->ExceptionClear();
+	}
+	env->DeleteLocalRef(cls);
+	env->DeleteLocalRef(activity);
+#endif
+}
 
 // GeneralsX @feature HishamAbulfeilat 28/09/2026 Pinch zoom is continuous: the wheel delta is
 // proportional to the log of the finger-distance change (fractional wheel values reach the
@@ -602,6 +691,7 @@ void handleTouchEvent(SDL3Mouse *mouse, SDL_Window *window, const SDL_Event &eve
 					sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_MOTION, cx, cy);
 					sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_BUTTON_DOWN, cx, cy, SDL_BUTTON_RIGHT);
 					sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_BUTTON_UP, cx, cy, SDL_BUTTON_RIGHT);
+					touchHaptic();
 					if (debugEnabled()) {
 						fprintf(stderr, "[touch] two-finger tap -> right click\n");
 					}
@@ -631,6 +721,7 @@ void updateTouchLongPress(SDL3Mouse *mouse, SDL_Window *window)
 		sendSyntheticMouse(mouse, window, SDL_EVENT_MOUSE_BUTTON_UP,
 		                   s_touch.downX, s_touch.downY, SDL_BUTTON_RIGHT);
 		s_touch.phase = TouchState::LONGPRESSED;
+		touchHaptic();
 	}
 
 	// Threshold was crossed but the LMB commit was deferred (see
@@ -807,6 +898,12 @@ Java_com_generalsx_generalszh_TouchKeyBar_nativeSetBoxSelect(JNIEnv *, jclass, j
 {
 	s_boxSelect.store(on == JNI_TRUE);
 }
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_generalsx_generalszh_GeneralsXZHActivity_nativeSetThermalFpsCap(JNIEnv *, jclass, jint cap)
+{
+	s_thermalFpsCap.store((int)cap);
+}
 #endif
 #endif // GX_TOUCH_UI
 
@@ -974,9 +1071,12 @@ void SDL3GameEngine::update(void)
 	// across repeated suspend/switcher cycles, crashes MoltenVK. Keep polling so
 	// we still catch the resume events; just don't touch the GPU.
 	if (iosShouldPauseRendering()) {
+		autosaveOnceWhileBackgrounded();
 		SDL_Delay(50);
 		return;
 	}
+	s_autosavedThisPause = false;
+	applyFpsCaps();
 #endif
 	GameEngine::update();
 }

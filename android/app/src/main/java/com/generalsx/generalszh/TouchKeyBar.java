@@ -219,6 +219,14 @@ final class TouchKeyBar {
 
     private TextView button(String label) {
         TextView b = new TextView(activity);
+        // Vibration on press, if the player keeps it on (Settings, LaunchOptions.haptics).
+        b.setOnTouchListener((v, e) -> {
+            if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN
+                    && LaunchOptions.haptics(activity)) {
+                v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+            }
+            return false;
+        });
         b.setText(label);
         b.setTextColor(Color.WHITE);
         b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);

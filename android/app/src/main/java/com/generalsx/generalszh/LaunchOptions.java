@@ -16,12 +16,17 @@ import android.util.Log;
  *    thermal/battery samples.
  *  - FPS overlay: DXVK_HUD, DXVK's on-screen frame rate and frame-time graph.
  *  - touch scheme: GX_TOUCH_SCHEME=mobile (one finger drags the camera).
+ *  - frame-rate cap: GX_RENDER_FPS (render only; the simulation's rate is fixed).
+ * Overheat protection and vibration are applied by GeneralsXZHActivity itself.
  */
 final class LaunchOptions {
     private static final String PREFS = "launch_options";
     private static final String KEY_DEBUG = "debug";
     private static final String KEY_FPS_OVERLAY = "fps_overlay";
     private static final String KEY_MOBILE_TOUCH = "mobile_touch";
+    private static final String KEY_RENDER_FPS = "render_fps";
+    private static final String KEY_THERMAL_GUARD = "thermal_guard";
+    private static final String KEY_HAPTICS = "haptics";
 
     private LaunchOptions() {}
 
@@ -53,6 +58,33 @@ final class LaunchOptions {
         prefs(context).edit().putBoolean(KEY_MOBILE_TOUCH, on).apply();
     }
 
+    /** Render frame-rate cap; 0 = the game's own setting. */
+    static int renderFps(Context context) {
+        return prefs(context).getInt(KEY_RENDER_FPS, 0);
+    }
+
+    static void setRenderFps(Context context, int fps) {
+        prefs(context).edit().putInt(KEY_RENDER_FPS, fps).apply();
+    }
+
+    /** Lower the frame rate while the phone is overheating (on by default). */
+    static boolean thermalGuard(Context context) {
+        return prefs(context).getBoolean(KEY_THERMAL_GUARD, true);
+    }
+
+    static void setThermalGuard(Context context, boolean on) {
+        prefs(context).edit().putBoolean(KEY_THERMAL_GUARD, on).apply();
+    }
+
+    /** Vibrate on on-screen keys and gesture commands (on by default). */
+    static boolean haptics(Context context) {
+        return prefs(context).getBoolean(KEY_HAPTICS, true);
+    }
+
+    static void setHaptics(Context context, boolean on) {
+        prefs(context).edit().putBoolean(KEY_HAPTICS, on).apply();
+    }
+
     /** Sets the environment for the engine; call before the native library starts. */
     static void exportToEnvironment(Context context) {
         if (debug(context)) {
@@ -64,6 +96,7 @@ final class LaunchOptions {
             setenv("DXVK_HUD", "fps,frametimes");
         }
         setenv("GX_TOUCH_SCHEME", mobileTouch(context) ? "mobile" : "classic");
+        setenv("GX_RENDER_FPS", String.valueOf(renderFps(context)));
     }
 
     private static void setenv(String name, String value) {

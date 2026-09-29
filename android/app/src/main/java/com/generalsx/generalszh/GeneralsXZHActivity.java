@@ -1,6 +1,10 @@
 package com.generalsx.generalszh;
 
+import android.net.wifi.WifiManager;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.view.HapticFeedbackConstants;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.util.Log;
@@ -26,6 +30,17 @@ public class GeneralsXZHActivity extends SDLActivity {
     private TouchKeyBar keyBar;
     /** Debug mode's logcat/thermal recording (null when debug mode is off). */
     private DebugSession debugSession;
+    /** Overheat protection: frame cap requested from the engine while this hot. */
+    private static final int THERMAL_FPS_CAP = 30;
+    private PowerManager.OnThermalStatusChangedListener thermalListener;
+    /**
+     * LAN games find each other with UDP broadcasts, which many phones drop unless an app holds
+     * a multicast lock; held while the game is in the foreground.
+     */
+    private WifiManager.MulticastLock lanLock;
+
+    /** Engine side: SDL3GameEngine.cpp (0 = no thermal cap). */
+    private static native void nativeSetThermalFpsCap(int cap);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -51,10 +66,48 @@ public class GeneralsXZHActivity extends SDLActivity {
         if (mLayout != null && !TouchKeyBar.isHidden(this)) {
             keyBar = TouchKeyBar.attach(this, mLayout, LaunchOptions.mobileTouch(this));
         }
+        if (mLayout != null && LaunchOptions.thermalGuard(this)) {
+            PowerManager power = getSystemService(PowerManager.class);
+            thermalListener = status -> {
+                boolean hot = status >= PowerManager.THERMAL_STATUS_SEVERE;
+                nativeSetThermalFpsCap(hot ? THERMAL_FPS_CAP : 0);
+                Log.i("GeneralsX", "thermal status " + status + (hot ? ": capping frame rate" : ""));
+            };
+            power.addThermalStatusListener(getMainExecutor(), thermalListener);
+        }
+        WifiManager wifi = getApplicationContext().getSystemService(WifiManager.class);
+        if (wifi != null) {
+            lanLock = wifi.createMulticastLock("GeneralsZH-LAN");
+            lanLock.setReferenceCounted(false);
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (lanLock != null) {
+            lanLock.acquire();
+        }
+    }
+
+    /**
+     * Called by the engine (SDL3GameEngine.cpp touchHaptic) when a gesture becomes a command,
+     * and by the key bar; a short tick if the player keeps vibration on.
+     */
+    public void gxHaptic() {
+        if (!LaunchOptions.haptics(this) || mLayout == null) {
+            return;
+        }
+        final int effect = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                ? HapticFeedbackConstants.CONFIRM : HapticFeedbackConstants.VIRTUAL_KEY;
+        runOnUiThread(() -> mLayout.performHapticFeedback(effect));
     }
 
     @Override
     protected void onDestroy() {
+        if (thermalListener != null) {
+            getSystemService(PowerManager.class).removeThermalStatusListener(thermalListener);
+        }
         if (debugSession != null) {
             debugSession.stop();
         }
@@ -66,6 +119,9 @@ public class GeneralsXZHActivity extends SDLActivity {
         // A modifier left held would stay pressed in the engine after returning.
         if (keyBar != null) {
             keyBar.releaseModifiers();
+        }
+        if (lanLock != null && lanLock.isHeld()) {
+            lanLock.release();
         }
         super.onPause();
     }

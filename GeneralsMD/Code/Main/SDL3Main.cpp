@@ -1166,8 +1166,20 @@ int main(int argc, char* argv[])
 				static char xresVal[16], yresVal[16];
 				static char xresFlag[] = "-xres";
 				static char yresFlag[] = "-yres";
-				const int yres = winH;
+				int yres = winH;
 				int xres = winW;
+#if defined(__ANDROID__)
+				// GeneralsX @performance HishamAbulfeilat 28/09/2026 Phone panels reach 1440p and
+				// beyond (3120x1440 on an S25 Ultra): rendering that many pixels costs heat and
+				// frame rate for little visible gain on a ~7" screen. Without a player choice,
+				// render at 1080 lines in the panel's shape; the pillarbox upscales to the
+				// panel. Settings / the Options menu can still pick native.
+				const int kAutoMaxHeight = 1080;
+				if (yres > kAutoMaxHeight) {
+					xres = (int)((long long)xres * kAutoMaxHeight / yres);
+					yres = kAutoMaxHeight;
+				}
+#endif
 				xres &= ~1;  // keep it even
 				snprintf(xresVal, sizeof(xresVal), "%d", xres);
 				snprintf(yresVal, sizeof(yresVal), "%d", yres);

@@ -145,7 +145,21 @@ public class SettingsActivity extends Activity {
                 new Choice("On", "yes"),
                 new Choice("Off", "no"),
         });
+        addRow("Text size", "Size of game text on small screens.", "ResolutionFontAdjustment",
+                new Choice[] {
+                        new Choice("Default", null),
+                        new Choice("Larger", "85"),
+                        new Choice("Largest", "100"),
+                });
         addKeyBarRow();
+        addFpsRow();
+        addSwitchRow("Overheat protection",
+                "When the phone gets too hot, drop to 30 frames per second until it cools down.",
+                LaunchOptions.thermalGuard(this) ? "On" : "Off",
+                () -> LaunchOptions.setThermalGuard(this, !LaunchOptions.thermalGuard(this)));
+        addSwitchRow("Vibration", "Short vibration for on-screen keys, long-press and two-finger tap.",
+                LaunchOptions.haptics(this) ? "On" : "Off",
+                () -> LaunchOptions.setHaptics(this, !LaunchOptions.haptics(this)));
         addSwitchRow("Touch controls",
                 "Classic: one finger draws a selection box, two fingers move the camera."
                         + " Mobile: one finger moves the camera; the key bar's \"Box\" switches it"
@@ -155,6 +169,34 @@ public class SettingsActivity extends Activity {
         addSwitchRow("FPS overlay", "Frame rate and frame times drawn in the corner.",
                 LaunchOptions.fpsOverlay(this) ? "Shown" : "Hidden",
                 () -> LaunchOptions.setFpsOverlay(this, !LaunchOptions.fpsOverlay(this)));
+    }
+
+    /** Render frame-rate cap (LaunchOptions.renderFps; the game's speed does not change). */
+    private void addFpsRow() {
+        final int[] values = { 0, 30, 45, 60 };
+        final String[] labels = { "Game default", "30 FPS (coolest, longest battery)", "45 FPS",
+                "60 FPS (smoothest)" };
+        int current = LaunchOptions.renderFps(this);
+        String shown = current + " FPS";
+        for (int i = 0; i < values.length; i++) {
+            if (values[i] == current) {
+                shown = labels[i];
+            }
+        }
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(0, dp(6), 0, dp(6));
+        row.addView(text("Frame rate cap", 16, Color.WHITE, true));
+        row.addView(text("Lower is cooler and saves battery; the game itself runs at the same speed.",
+                13, Color.LTGRAY, false));
+        row.addView(button(shown, v -> new AlertDialog.Builder(this)
+                .setTitle("Frame rate cap")
+                .setItems(labels, (d, which) -> {
+                    LaunchOptions.setRenderFps(this, values[which]);
+                    refresh();
+                })
+                .show()));
+        rows.addView(row);
     }
 
     /** A two-state launcher option (LaunchOptions): tapping flips it. */
@@ -188,8 +230,15 @@ public class SettingsActivity extends Activity {
         int panelW = Math.max(w, h);
         int panelH = Math.min(w, h);
         List<Choice> list = new ArrayList<>();
-        list.add(new Choice("Full screen, native (" + panelW + " x " + panelH + ")", null));
-        int[] heights = { 1080, 900, 720 };
+        // Auto matches SDL3Main.cpp: native up to 1080 lines, else 1080 lines in the panel's shape.
+        int autoH = Math.min(panelH, 1080);
+        int autoW = (int) ((long) autoH * panelW / panelH) & ~1;
+        list.add(new Choice("Auto, recommended (" + autoW + " x " + autoH + ")", null));
+        if (panelH > 1080) {
+            list.add(new Choice("Native, sharpest but hotter (" + panelW + " x " + panelH + ")",
+                    panelW + " " + panelH));
+        }
+        int[] heights = { 900, 720 };
         for (int ht : heights) {
             if (ht < panelH) {
                 int wd = (int) ((long) ht * panelW / panelH) & ~1;
@@ -271,12 +320,15 @@ public class SettingsActivity extends Activity {
 
     private void resetAll() {
         for (String key : new String[] { "Resolution", "StaticGameLOD", "TextureReduction",
-                "MaxCameraHeight", "ScrollFactor", "FPSLimit" }) {
+                "MaxCameraHeight", "ScrollFactor", "FPSLimit", "ResolutionFontAdjustment" }) {
             options.set(key, null);
         }
         TouchKeyBar.setHidden(this, false);
         LaunchOptions.setMobileTouch(this, false);
         LaunchOptions.setFpsOverlay(this, false);
+        LaunchOptions.setRenderFps(this, 0);
+        LaunchOptions.setThermalGuard(this, true);
+        LaunchOptions.setHaptics(this, true);
         save();
     }
 
