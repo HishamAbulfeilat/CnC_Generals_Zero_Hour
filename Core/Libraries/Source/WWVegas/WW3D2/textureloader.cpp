@@ -51,6 +51,9 @@
 #include "dx8wrapper.h"
 #include "dx8caps.h"
 #include "missingtexture.h"
+#include <cstdio>
+#include <set>
+#include <string>
 #include "TARGA.h"
 #include <d3dx8tex.h>
 #include "wwmemlog.h"
@@ -1315,6 +1318,19 @@ void TextureLoadTaskClass::Apply_Missing_Texture()
 	if (Texture == nullptr)
 	{
 		return;
+	}
+
+	// GeneralsX @bugfix HishamAbulfeilat 30/09/2026 Name textures that fall back to the
+	// "missing" placeholder in release builds too (game.log / Android "Save logs"), once each
+	// and at most kMaxReported, so blank images in menus and loading screens can be traced.
+	{
+		static std::set<std::string> reported;
+		static const size_t kMaxReported = 200;
+		const char *path = Texture->Get_Full_Path().str();
+		if (reported.size() < kMaxReported && reported.insert(path ? path : "").second) {
+			fprintf(stderr, "ERROR: [texture] missing or unreadable, showing placeholder: %s\n",
+			        path ? path : "<unnamed>");
+		}
 	}
 
 	D3DTexture = MissingTexture::_Get_Missing_Texture();

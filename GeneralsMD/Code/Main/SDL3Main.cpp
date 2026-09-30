@@ -1057,7 +1057,20 @@ int main(int argc, char* argv[])
 		// filtering, so terrain smears under the tilted RTS camera. Mobile GPUs
 		// (Adreno/Turnip and Xclipse alike) support it; force it for sharp ground
 		// textures. A user-supplied dxvk.conf can still override via the file.
-		setenv("DXVK_CONFIG", "d3d9.deferSurfaceCreation = True;d3d9.samplerAnisotropy = 16", 0);
+		// GeneralsX @performance HishamAbulfeilat 30/09/2026 Anisotropy comes from the launcher's
+		// "Texture filtering" setting (GX_ANISOTROPY); default 8x: on a phone screen it looks
+		// the same as 16x and costs less memory bandwidth (heat, battery).
+		{
+			const char *aniso = getenv("GX_ANISOTROPY");
+			int level = aniso != nullptr ? atoi(aniso) : 8;
+			if (level != 0 && level != 2 && level != 4 && level != 8 && level != 16) {
+				level = 8;
+			}
+			char dxvkConfig[128];
+			snprintf(dxvkConfig, sizeof(dxvkConfig),
+			         "d3d9.deferSurfaceCreation = True;d3d9.samplerAnisotropy = %d", level);
+			setenv("DXVK_CONFIG", dxvkConfig, 0);
+		}
 #endif
 
 		// GeneralsX @bugfix BenderAI 06/03/2026 - Exclude LLVMpipe Vulkan ICD before loading Vulkan.

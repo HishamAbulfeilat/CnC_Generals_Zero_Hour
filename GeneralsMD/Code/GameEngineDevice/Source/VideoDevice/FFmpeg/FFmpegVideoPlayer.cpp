@@ -46,6 +46,7 @@
 //----------------------------------------------------------------------------
 
 #include "Lib/BaseType.h"
+#include <cstdio>
 #include "VideoDevice/FFmpeg/FFmpegVideoPlayer.h"
 #include "Common/AudioAffect.h"
 #include "Common/GameAudio.h"
@@ -270,7 +271,20 @@ VideoStreamInterface*	FFmpegVideoPlayer::open( AsciiString movieTitle )
 		}
 
 		DEBUG_LOG(("FFmpegVideoPlayer::createStream() - About to create stream\n"));
+		// GeneralsX @bugfix HishamAbulfeilat 30/09/2026 Log which movie failed and why, in
+		// release builds too (game.log), instead of silently showing nothing.
+		if (file == nullptr) {
+			fprintf(stderr, "ERROR: [video] movie '%s' not found (Data/%s/Movies or Data/Movies, %s.%s)\n",
+			        movieTitle.str(), GetRegistryLanguage().str(), pVideo->m_filename.str(), VIDEO_EXT);
+		}
         stream = createStream( file );
+		if (file != nullptr && stream == nullptr) {
+			fprintf(stderr, "ERROR: [video] movie '%s' (%s.%s) could not be decoded\n",
+			        movieTitle.str(), pVideo->m_filename.str(), VIDEO_EXT);
+		}
+	}
+	else {
+		fprintf(stderr, "ERROR: [video] no video entry named '%s' in Video.ini\n", movieTitle.str());
 	}
 
 	return stream;	

@@ -1,3 +1,4 @@
+#include <cstdio>
 #include "VideoDevice/FFmpeg/FFmpegFile.h"
 #include "Common/file.h"
 
@@ -63,6 +64,9 @@ bool FFmpegFile::open(File *file)
         char error_buffer[1024];
         av_strerror(result, error_buffer, sizeof(error_buffer));
         DEBUG_LOG(("Failed 'avformat_open_input': %s", error_buffer));
+        // GeneralsX @bugfix HishamAbulfeilat 30/09/2026 Report video failures in release builds too
+        // (game.log / "Save logs"): missing movies were otherwise invisible on Android.
+        fprintf(stderr, "ERROR: [video] cannot open movie: %s\n", error_buffer);
         close();
         return false;
     }
@@ -72,6 +76,7 @@ bool FFmpegFile::open(File *file)
         char error_buffer[1024];
         av_strerror(result, error_buffer, sizeof(error_buffer));
         DEBUG_LOG(("Failed 'avformat_find_stream_info': %s", error_buffer));
+        fprintf(stderr, "ERROR: [video] cannot read movie streams: %s\n", error_buffer);
         close();
         return false;
     }
@@ -82,6 +87,8 @@ bool FFmpegFile::open(File *file)
         const AVCodec *input_codec = avcodec_find_decoder(av_stream->codecpar->codec_id);
         if (input_codec == nullptr) {
             DEBUG_LOG(("Codec not supported: '%s'", avcodec_get_name(av_stream->codecpar->codec_id)));
+            fprintf(stderr, "ERROR: [video] codec not in this FFmpeg build: %s\n",
+                    avcodec_get_name(av_stream->codecpar->codec_id));
             close();
             return false;
         }

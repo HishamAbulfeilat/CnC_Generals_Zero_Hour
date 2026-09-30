@@ -153,6 +153,7 @@ public class SettingsActivity extends Activity {
                 });
         addKeyBarRow();
         addFpsRow();
+        addAnisotropyRow();
         addSwitchRow("Overheat protection",
                 "When the phone gets too hot, drop to 30 frames per second until it cools down.",
                 LaunchOptions.thermalGuard(this) ? "On" : "Off",
@@ -193,6 +194,33 @@ public class SettingsActivity extends Activity {
                 .setTitle("Frame rate cap")
                 .setItems(labels, (d, which) -> {
                     LaunchOptions.setRenderFps(this, values[which]);
+                    refresh();
+                })
+                .show()));
+        rows.addView(row);
+    }
+
+    /** Anisotropic filtering (LaunchOptions.anisotropy): ground texture sharpness at an angle. */
+    private void addAnisotropyRow() {
+        final int[] values = { 0, 4, 8, 16 };
+        final String[] labels = { "Off (fastest)", "4x", "8x (recommended)", "16x (sharpest)" };
+        int current = LaunchOptions.anisotropy(this);
+        String shown = current + "x";
+        for (int i = 0; i < values.length; i++) {
+            if (values[i] == current) {
+                shown = labels[i];
+            }
+        }
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(0, dp(6), 0, dp(6));
+        row.addView(text("Texture filtering", 16, Color.WHITE, true));
+        row.addView(text("Sharpness of the ground far from the camera. Higher costs a little"
+                + " battery and heat.", 13, Color.LTGRAY, false));
+        row.addView(button(shown, v -> new AlertDialog.Builder(this)
+                .setTitle("Texture filtering")
+                .setItems(labels, (d, which) -> {
+                    LaunchOptions.setAnisotropy(this, values[which]);
                     refresh();
                 })
                 .show()));
@@ -329,6 +357,7 @@ public class SettingsActivity extends Activity {
         LaunchOptions.setRenderFps(this, 0);
         LaunchOptions.setThermalGuard(this, true);
         LaunchOptions.setHaptics(this, true);
+        LaunchOptions.setAnisotropy(this, 8);
         save();
     }
 

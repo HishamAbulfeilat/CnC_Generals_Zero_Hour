@@ -27,6 +27,7 @@ final class LaunchOptions {
     private static final String KEY_RENDER_FPS = "render_fps";
     private static final String KEY_THERMAL_GUARD = "thermal_guard";
     private static final String KEY_HAPTICS = "haptics";
+    private static final String KEY_ANISOTROPY = "anisotropy";
 
     private LaunchOptions() {}
 
@@ -85,6 +86,15 @@ final class LaunchOptions {
         prefs(context).edit().putBoolean(KEY_HAPTICS, on).apply();
     }
 
+    /** Anisotropic texture filtering level (0 = off, 2, 4, 8, 16); SDL3Main.cpp DXVK_CONFIG. */
+    static int anisotropy(Context context) {
+        return prefs(context).getInt(KEY_ANISOTROPY, 8);
+    }
+
+    static void setAnisotropy(Context context, int level) {
+        prefs(context).edit().putInt(KEY_ANISOTROPY, level).apply();
+    }
+
     /** Sets the environment for the engine; call before the native library starts. */
     static void exportToEnvironment(Context context) {
         if (debug(context)) {
@@ -97,6 +107,7 @@ final class LaunchOptions {
         }
         setenv("GX_TOUCH_SCHEME", mobileTouch(context) ? "mobile" : "classic");
         setenv("GX_RENDER_FPS", String.valueOf(renderFps(context)));
+        setenv("GX_ANISOTROPY", String.valueOf(anisotropy(context)));
     }
 
     private static void setenv(String name, String value) {
